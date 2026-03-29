@@ -248,7 +248,13 @@ function showPhase(phase) {
 
 function setupEventListeners() {
     $("#connectWalletBtn").onclick = connectWallet;
-    $("#createRoomBtn").onclick = () => $("#createRoomModal").classList.add("visible");
+    $("#createRoomBtn").onclick = () => {
+        if (!state.connected) {
+            alert("⚠️ Please CONNECT WALLET first to open a new court.");
+            return;
+        }
+        $("#createRoomModal").classList.add("visible");
+    };
     $("#cancelCreateBtn").onclick = () => $("#createRoomModal").classList.remove("visible");
     $("#confirmCreateBtn").onclick = createRoom;
     $("#startGameBtn").onclick = startGame;
