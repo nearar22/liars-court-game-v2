@@ -248,14 +248,21 @@ function showPhase(phase) {
 
 function setupEventListeners() {
     $("#connectWalletBtn").onclick = connectWallet;
-    $("#createRoomBtn").onclick = () => {
+    const createModal = $("#createRoomModal");
+    $("#createRoomBtn").addEventListener("click", () => {
         if (!state.connected) {
             alert("⚠️ Please CONNECT WALLET first to open a new court.");
             return;
         }
-        $("#createRoomModal").classList.add("visible");
-    };
-    $("#cancelCreateBtn").onclick = () => $("#createRoomModal").classList.remove("visible");
+        createModal.classList.add("visible");
+        createModal.style.display = "flex"; // Double check display
+        createModal.style.opacity = "1";
+    });
+    
+    $("#cancelCreateBtn").addEventListener("click", () => {
+        createModal.classList.remove("visible");
+        createModal.style.display = "none";
+    });
     $("#confirmCreateBtn").onclick = createRoom;
     $("#startGameBtn").onclick = startGame;
     $("#submitClaimBtn").onclick = submitClaim;

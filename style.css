@@ -613,17 +613,20 @@ body {
    ══════════════════ */
 .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(8px);
-    display: flex;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    display: none; /* Changed from display: flex to none */
     align-items: center;
     justify-content: center;
-    z-index: 200;
+    z-index: 999; /* Increased z-index */
     opacity: 0;
-    pointer-events: none;
     transition: opacity 0.3s ease;
 }
-.modal-overlay.visible { opacity: 1; pointer-events: all; }
+.modal-overlay.visible { 
+    display: flex; /* Show when visible */
+    opacity: 1; 
+    pointer-events: all; 
+}
 
 .modal {
     background: var(--bg-card);
