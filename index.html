@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liar's Court — GenLayer Mini-Game</title>
+    <meta name="description" content="A multiplayer AI-powered fact-checking game built on GenLayer blockchain. Create rooms, invite friends, and let the AI Judge decide!">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ═══════ HEADER ═══════ -->
+    <header class="header" id="header">
+        <div class="logo">
+            <div class="logo-icon">⚖️</div>
+            <div class="logo-text">
+                <h1>LIAR'S COURT</h1>
+                <p>Powered by GenLayer</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="network-badge">
+                <span class="network-dot"></span>
+                Bradbury Testnet
+            </div>
+            <button class="wallet-btn" id="connectWalletBtn">CONNECT WALLET</button>
+        </div>
+    </header>
+
+    <!-- ═══════ MAIN APP ═══════ -->
+    <div class="app">
+
+        <!-- ═══════ SIDEBAR ═══════ -->
+        <aside class="sidebar">
+            <!-- Rooms -->
+            <div class="card">
+                <div class="card-title">Active Courts</div>
+                <ul class="room-list" id="roomList">
+                    <!-- Rooms injected via JS -->
+                </ul>
+                <button class="create-room-btn" id="createRoomBtn">+ Create New Court</button>
+                
+                <!-- Join by Code -->
+                <div class="join-section">
+                    <input class="join-input" id="joinCodeInput" type="text" placeholder="Enter room code..." maxlength="6">
+                    <button class="join-btn" id="joinByCodeBtn">JOIN</button>
+                </div>
+            </div>
+
+            <!-- Leaderboard -->
+            <div class="card">
+                <div class="card-title">Top Liars</div>
+                <div id="leaderboard">
+                    <!-- Leaderboard entries injected via JS -->
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+                <div class="card-title">Activity</div>
+                <div class="activity-log" id="activityLog">
+                    <!-- Log entries injected via JS -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- ═══════ GAME AREA ═══════ -->
+        <main class="game-area" id="gameArea">
+
+            <!-- Phase Progress -->
+            <div class="phase-bar" id="phaseBar">
+                <div class="phase-step" data-phase="LOBBY">🏛️ Lobby</div>
+                <div class="phase-step" data-phase="CLAIMING">📝 Claim</div>
+                <div class="phase-step" data-phase="VOTING">🗳️ Vote</div>
+                <div class="phase-step" data-phase="JUDGING">🤖 AI Judge</div>
+                <div class="phase-step" data-phase="RESULTS">🏆 Results</div>
+            </div>
+
+            <!-- Theme -->
+            <div class="theme-banner" id="themeBanner">
+                <div class="theme-icon">🌍</div>
+                <div>
+                    <div class="theme-label">This Round's Theme</div>
+                    <div class="theme-name" id="themeName">Geography & Countries</div>
+                </div>
+            </div>
+
+            <!-- PHASE: ROOM LOBBY (Players waiting) -->
+            <section class="room-lobby animate-in" id="roomLobby">
+                <div class="room-header">
+                    <div class="room-header-left">
+                        <h2 id="lobbyRoomName">Waiting for Court...</h2>
+                        <div class="room-code">
+                            Code: <strong id="lobbyRoomCode">------</strong>
+                            <button class="copy-btn" id="copyCodeBtn">📋 Copy</button>
+                        </div>
+                    </div>
+                    <button class="start-game-btn" id="startGameBtn" disabled>START GAME</button>
+                </div>
+                <div class="players-grid" id="playersGrid">
+                    <!-- Player slots injected via JS -->
+                </div>
+            </section>
+
+            <!-- PHASE: CLAIMING -->
+            <section class="input-area animate-in" id="claimSection" style="display:none;">
+                <h3>Submit Your Claim</h3>
+                <p>Write a statement about the theme. It can be TRUE or a cleverly crafted LIE. Other players will try to spot it!</p>
+                <textarea class="claim-input" id="claimInput" placeholder="e.g. The Sahara Desert was once a lush green forest with rivers and lakes..."></textarea>
+                <div class="input-actions">
+                    <label class="lie-toggle">
+                        <input type="checkbox" id="isLieToggle">
+                        <span class="toggle-track"></span>
+                        <span class="toggle-label" id="toggleLabel">This is TRUE ✓</span>
+                    </label>
+                    <button class="submit-claim-btn" id="submitClaimBtn">SUBMIT TO COURT</button>
+                </div>
+            </section>
+
+            <!-- PHASE: VOTING -->
+            <section id="votingSection" style="display:none;">
+                <div class="claims-grid" id="claimsGrid">
+                    <!-- Claim cards injected via JS -->
+                </div>
+                <button class="submit-claim-btn" id="submitVotesBtn" style="margin-top:1rem;">SUBMIT VERDICT</button>
+            </section>
+
+            <!-- PHASE: JUDGING -->
+            <section id="judgingSection" style="display:none;">
+                <div class="card" style="text-align:center; padding: 3rem;">
+                    <div class="spinner"></div>
+                    <p class="waiting-text">The AI Judge is consulting Wikipedia...</p>
+                    <p class="waiting-text" style="margin-top:0.5rem; font-size:0.75rem;">Validators are reaching consensus via Optimistic Democracy</p>
+                </div>
+            </section>
+
+            <!-- PHASE: WAITING FOR PLAYERS -->
+            <section id="waitingSection" style="display:none;">
+                <div class="card" style="text-align:center; padding: 3rem;">
+                    <div class="spinner"></div>
+                    <p class="waiting-text" id="waitingText">Waiting for other players to submit...</p>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ═══════ RESULTS MODAL ═══════ -->
+    <div class="results-overlay" id="resultsOverlay">
+        <div class="results-modal">
+            <h2>⚖️ COURT ADJOURNED</h2>
+            <p style="color: var(--text-muted);">The AI Judge has spoken.</p>
+            <div class="winner-name" id="winnerName">🏆 Player Name</div>
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr><th>Player</th><th>Claim</th><th>Verdict</th><th>Points</th></tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+            </table>
+            <button class="submit-claim-btn" style="margin-top:1.5rem;" id="playAgainBtn">PLAY AGAIN</button>
+        </div>
+    </div>
+
+    <!-- ═══════ CREATE ROOM MODAL ═══════ -->
+    <div class="modal-overlay" id="createRoomModal">
+        <div class="modal">
+            <h2>⚖️ Open New Court</h2>
+            <div class="modal-field">
+                <label>Room Name</label>
+                <input class="modal-input" id="newRoomName" type="text" placeholder="e.g. Bradbury Arena" maxlength="25">
+            </div>
+            <div class="modal-field">
+                <label>Choose Theme</label>
+                <div class="theme-options" id="themeOptions">
+                    <div class="theme-option selected" data-theme="Geography">
+                        <span class="theme-emoji">🌍</span> Geography
+                    </div>
+                    <div class="theme-option" data-theme="History">
+                        <span class="theme-emoji">📜</span> History
+                    </div>
+                    <div class="theme-option" data-theme="Science">
+                        <span class="theme-emoji">🔬</span> Science
+                    </div>
+                    <div class="theme-option" data-theme="Sports">
+                        <span class="theme-emoji">⚽</span> Sports
+                    </div>
+                    <div class="theme-option" data-theme="Technology">
+                        <span class="theme-emoji">💻</span> Tech
+                    </div>
+                    <div class="theme-option" data-theme="Random">
+                        <span class="theme-emoji">🎲</span> Random
+                    </div>
+                </div>
+            </div>
+            <div class="modal-field">
+                <label>Max Players</label>
+                <select class="modal-select" id="maxPlayersSelect">
+                    <option value="2">2 Players</option>
+                    <option value="3">3 Players</option>
+                    <option value="4" selected>4 Players</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" id="cancelCreateBtn">Cancel</button>
+                <button class="btn-create" id="confirmCreateBtn">🏛️ Open Court</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
