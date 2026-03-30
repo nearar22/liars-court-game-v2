@@ -510,27 +510,33 @@ async function submitClaim() {
     btn.textContent = "SUBMITTING...";
 
     try {
-        // Save to Firebase
+        addLog("Sending claim to GenLayer...");
+        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
+        const room = snap.val();
+        
+        // Step 1: Submit to GenLayer first
+        const txHash = await glWrite("submit_claim", [room.glRoomId || 0, text, isLie]);
+        addLog(`Claim tx: <a href="${EXPLORER_URL}/tx/${txHash}" target="_blank" style="color:var(--gold);text-decoration:underline;">${txHash.slice(0,10)}...</a>`);
+
+        // Step 2: Update Firebase
         await db.ref(`rooms/${state.currentRoomId}/claims/${state.playerAddr}`).set({
             text, isLie, username: state.playerName
         });
         state.myClaim = { text, isLie };
-        addLog("Claim submitted!");
+        addLog("Claim recorded in Court!");
 
-        // Check if all players submitted
-        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
-        const room  = snap.val();
+        // Step 3: Check if all players submitted to move phase
         const pc    = Object.keys(room.players).length;
-        const cc    = room.claims ? Object.keys(room.claims).length : 0;
+        const cc    = room.claims ? Object.keys(room.claims).length + 1 : 1;
 
         if (cc >= pc) {
             await db.ref("rooms/" + state.currentRoomId).update({ phase: "VOTING" });
         } else {
             showPhase("WAITING");
-            $("#waitingText").textContent = `Waiting for ${pc - cc} more player(s) to submit...`;
+            $("#waitingText").textContent = `Waiting for ${pc - cc} more player(s)...`;
         }
     } catch (err) {
-        addLog(`❌ Error: ${err.message}`);
+        addLog(`❌ Claim Error: ${err.message}`);
         btn.disabled = false;
         btn.textContent = "SUBMIT TO COURT";
     }
@@ -619,29 +625,29 @@ async function submitVotes() {
     btn.textContent = "SUBMITTING...";
 
     try {
-        await db.ref(`rooms/${state.currentRoomId}/votes/${state.playerAddr}`).set(state.myVotes);
-        addLog("Votes submitted!");
+        addLog("Sending votes to GenLayer...");
+        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
+        const room = snap.val();
 
-        const snap  = await db.ref("rooms/" + state.currentRoomId).once("value");
-        const room  = snap.val();
+        // Step 1: Submit to GenLayer
+        const txHash = await glWrite("submit_votes", [room.glRoomId || 0, JSON.stringify(state.myVotes)]);
+        addLog(`Votes tx: <a href="${EXPLORER_URL}/tx/${txHash}" target="_blank" style="color:var(--gold);text-decoration:underline;">${txHash.slice(0,10)}...</a>`);
+
+        // Step 2: Update Firebase
+        await db.ref(`rooms/${state.currentRoomId}/votes/${state.playerAddr}`).set(state.myVotes);
+        addLog("Votes recorded!");
+
         const pc    = Object.keys(room.players).length;
-        const vc    = room.votes ? Object.keys(room.votes).length : 0;
+        const vc    = room.votes ? Object.keys(room.votes).length + 1 : 1;
 
         if (vc >= pc) {
-            // All voted — move to JUDGING phase
             await db.ref("rooms/" + state.currentRoomId).update({ phase: "JUDGING" });
-            addLog("All voted! AI Judge is analyzing...");
-
-            // Host triggers GenLayer judge
-            if (state.isHost) {
-                await triggerGenLayerJudge(room);
-            }
         } else {
             showPhase("WAITING");
-            $("#waitingText").textContent = `Waiting for ${pc - vc} more player(s) to vote...`;
+            $("#waitingText").textContent = `Waiting for ${pc - vc} more player(s)...`;
         }
     } catch (err) {
-        addLog(`❌ Error: ${err.message}`);
+        addLog(`❌ Vote Error: ${err.message}`);
         btn.disabled = false;
         btn.textContent = "SUBMIT VERDICT";
     }
@@ -661,36 +667,15 @@ async function triggerGenLayerJudge(room) {
     }
 
     try {
-        // Step 1 – Submit the host's claim to GenLayer contract
-        const claims  = room.claims || {};
-        const votes   = room.votes  || {};
-
-        // Submit the host's own claim to GenLayer
-        const hostClaim = claims[state.playerAddr];
-        if (hostClaim) {
-            addLog(`Submitting your claim to GenLayer...`);
-            try {
-                await glWrite("submit_claim", [glRoomId, hostClaim.text, hostClaim.isLie]);
-            } catch (e) {
-                // Ignore "already submitted" errors
-                if (!e.message.includes("already")) addLog(`⚠️ Claim submit: ${e.message}`);
-            }
-        }
-
-        // Submit votes to GenLayer
-
-        addLog("Submitting votes to GenLayer...");
-        await glWrite("submit_votes", [glRoomId, JSON.stringify(state.myVotes)]);
-
-        // Step 2 – Trigger AI judging
-        addLog("🧠 GenLayer AI is fact-checking...");
+        // Step 1 – Trigger AI judging (Only ONE transaction for host now!)
+        addLog("🧠 GenLayer AI is starting fact-check...");
         const judgeTx = await glWrite("judge_claims", [glRoomId]);
         addLog(`Judge TX: <a href="${EXPLORER_URL}/tx/${judgeTx}" target="_blank" style="color:var(--gold);text-decoration:underline;">${judgeTx.slice(0,12)}...</a>`);
-        addLog("Waiting for AI consensus (this may take ~30–60s)...");
+        addLog("Consensus phase (~30–60s)...");
 
-        // Step 3 – Poll for result
+        // Step 2 – Poll for result
         const receipt = await pollTxResult(judgeTx, 120000);
-        addLog("✅ GenLayer AI verdict received!");
+        addLog("✅ AI Verdict reached!");
 
         // Step 4 – Read results from GenLayer contract
         const roomDataStr = await glRead("gen_call", [{
