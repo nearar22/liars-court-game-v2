@@ -703,7 +703,8 @@ async function pollinationsFactCheck(claims, theme) {
 Claim: "${textToAnalyze}"
 Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctuation.`;
 
-        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt) + '?model=mistral';
+        // We don't specify the model to use the default robust one
+        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt);
         
         try {
             console.log("AI checking claim:", textToAnalyze);
@@ -711,8 +712,7 @@ Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctu
             
             if (!res.ok) {
                 console.error("AI API returned status:", res.status);
-                // Fallback to random if API fails heavily
-                verdicts[addr] = Math.random() > 0.5;
+                verdicts[addr] = true; // Fallback to safe truth on network error
                 continue;
             }
             
