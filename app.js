@@ -720,7 +720,71 @@ async function factCheckWithWikipedia(claimText) {
         const allSnippets = hits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
         const combined = extract + " " + allSnippets;
 
-        // Check keyword overlap
+        // ── NUMBER-AWARE CHECK ──
+        // "messi has 10 ballon d'or" → extract 10, search topic, compare
+        const claimNumbers = claim.match(/\d+/g);
+        if (claimNumbers && claimNumbers.length > 0) {
+            const claimedNum = parseInt(claimNumbers[0]);
+            // Remove number from claim to get the topic
+            const topicQuery = claimText.replace(/\d+/g, "").replace(/\s+/g, " ").trim();
+
+            addLog(`🔢 Number claim detected: ${claimedNum} — topic: "${topicQuery.slice(0,40)}"`);
+
+            // Search topic separately
+            const topicHits = await wikiSearch(topicQuery);
+            if (topicHits.length > 0) {
+                const topicExtract = await wikiExtract(topicHits[0].pageid);
+                const topicSnippets = topicHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
+                const topicText = topicExtract + " " + topicSnippets;
+
+                // Word-to-number map
+                const wordNums = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,
+                    "eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,
+                    "fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,
+                    "nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50};
+
+                // Find all numbers in Wikipedia text
+                const wikiNums = new Set();
+                const digitMatches = topicText.match(/\d+/g) || [];
+                digitMatches.forEach(n => wikiNums.add(parseInt(n)));
+                // Also check written-out numbers
+                for (const [word, num] of Object.entries(wordNums)) {
+                    if (topicText.includes(word)) wikiNums.add(num);
+                }
+
+                // Get keywords from claim (excluding numbers and stop words)
+                const stopW = new Set(["the","a","an","is","are","was","were","in","on","at","to","for","of","and","or","but","not","with","has","have","had"]);
+                const keywords = topicQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopW.has(w));
+
+                // Find numbers that appear NEAR the keywords in the text
+                // Split text into sentences
+                const sentences = topicText.split(/[.!?]+/);
+                let relevantNums = new Set();
+                for (const sent of sentences) {
+                    const hasKeyword = keywords.some(k => sent.includes(k));
+                    if (hasKeyword) {
+                        const sentNums = sent.match(/\d+/g) || [];
+                        sentNums.forEach(n => relevantNums.add(parseInt(n)));
+                        for (const [word, num] of Object.entries(wordNums)) {
+                            if (sent.includes(word)) relevantNums.add(num);
+                        }
+                    }
+                }
+
+                addLog(`📊 Claimed: ${claimedNum} | Wikipedia numbers near topic: [${[...relevantNums].join(",")}]`);
+
+                if (relevantNums.size > 0) {
+                    if (relevantNums.has(claimedNum)) {
+                        return { verdict: true, evidence: `Wikipedia confirms the number ${claimedNum}` };
+                    } else {
+                        const closest = [...relevantNums].sort((a,b) => Math.abs(a-claimedNum) - Math.abs(b-claimedNum));
+                        return { verdict: false, evidence: `Wikipedia says ${closest[0]}, not ${claimedNum}` };
+                    }
+                }
+            }
+        }
+
+        // ── KEYWORD OVERLAP (fallback for non-numeric claims) ──
         const stopWords = new Set(["the","a","an","is","are","was","were","in","on","at","to","for","of","and","or","but","not","with","this","that","it","as","by","from","has","have","had","be","been"]);
         const words = claim.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
         const matched = words.filter(w => combined.includes(w)).length;
