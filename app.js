@@ -788,14 +788,16 @@ async function calculateResultsLocally(room) {
             points = 1;   // Told the truth, confirmed
         }
 
-        // ── Voter bonuses ──
+        // ── Voter bonuses (based on FACTUAL truth, not declaration) ──
         for (const [voter, vv] of Object.entries(votes)) {
             if (voter !== addr && vv[addr]) {
-                // Voters are judged on whether they detected the player's LIE INTENT
-                const detectedCorrectly = (vv[addr] === "LIE" && playerSaidLie) ||
-                                          (vv[addr] === "TRUTH" && !playerSaidLie);
+                // Reward voters who correctly identified the FACTUAL truth:
+                // Voted LIE on a FALSE claim = smart detective (+1)
+                // Voted TRUTH on a TRUE claim = correct trust (+1)
+                const voterCorrect = (vv[addr] === "LIE" && !claimIsActuallyTrue) ||
+                                     (vv[addr] === "TRUTH" && claimIsActuallyTrue);
                 if (!results[voter]) results[voter] = { points: 0 };
-                if (detectedCorrectly) results[voter].points += 1;
+                if (voterCorrect) results[voter].points += 1;
             }
         }
 
@@ -853,6 +855,21 @@ function showResults(results, winner, claims) {
         else if (!res.was_lie && res.verdict===true)  why = "Truth confirmed!";
         else if (!res.was_lie)                        why = "Truth teller";
 
+        // Verdict badge (context-aware)
+        let verdictBadge = "";
+        let verdictClass = "";
+        if (res.was_lie && res.was_caught) {
+            verdictBadge = "CAUGHT"; verdictClass = "verdict-caught";
+        } else if (res.was_lie && !res.was_caught) {
+            verdictBadge = "ESCAPED"; verdictClass = "verdict-true";
+        } else if (!res.was_lie && res.verdict === false) {
+            verdictBadge = "WRONG"; verdictClass = "verdict-caught";
+        } else if (!res.was_lie && res.verdict === true) {
+            verdictBadge = "CORRECT"; verdictClass = "verdict-true";
+        } else {
+            verdictBadge = "CLEAN"; verdictClass = "verdict-true";
+        }
+
         html += `<tr>
             <td><strong>${res.username || shortAddr(addr)}</strong></td>
             <td>
@@ -861,8 +878,8 @@ function showResults(results, winner, claims) {
                 ${aiBadge}
             </td>
             <td>
-                <span class="verdict ${res.was_caught?"verdict-caught":"verdict-true"}">
-                    ${res.was_caught?"CAUGHT":"CLEAN"}
+                <span class="verdict ${verdictClass}">
+                    ${verdictBadge}
                 </span>
                 <div style="font-size:0.6rem;color:var(--text-dim);margin-top:4px;">${why}</div>
             </td>
