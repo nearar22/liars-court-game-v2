@@ -45,6 +45,23 @@ function addLog(msg) {
     if (log.children.length > 25) log.lastChild.remove();
 }
 
+// UI Loading helpers
+function showLoadingBanner(text) {
+    const banner = $("#judgingSection");
+    if (!banner) return;
+    const txt = $("#judgingLoadingText");
+    if (txt) txt.textContent = text;
+    banner.style.display = "block";
+    
+    // Auto-scroll to loading section
+    banner.scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideLoadingBanner() {
+    const banner = $("#judgingSection");
+    if (banner) banner.style.display = "none";
+}
+
 // ══════════════════════════════════════════════════════
 //  FIREBASE SETUP
 // ══════════════════════════════════════════════════════
@@ -151,14 +168,24 @@ async function glWrite(fnName, args) {
 
 async function pollTxResult(txHash, maxWait = 120000) {
     const start = Date.now();
+    addLog(`Polling for transaction result...`);
     while (Date.now() - start < maxWait) {
         try {
+            // Use standard receipt check
             const result = await glRead("eth_getTransactionReceipt", [txHash]);
-            if (result && result.status) return result;
-        } catch (_) {}
-        await new Promise(r => setTimeout(r, 3000));
+            if (result) {
+                if (result.status === "0x1" || result.status === true || result.status === 1) {
+                    return result;
+                } else if (result.status === "0x0" || result.status === false || result.status === 0) {
+                    throw new Error("Transaction reverted on-chain");
+                }
+            }
+        } catch (e) {
+            if (e.message.includes("reverted")) throw e;
+        }
+        await new Promise(r => setTimeout(r, 1500)); // Polling faster (1.5s instead of 3s)
     }
-    throw new Error("Transaction timeout");
+    throw new Error("Transaction timeout — GenLayer might be slow, check explorer.");
 }
 
 // ══════════════════════════════════════════════════════
