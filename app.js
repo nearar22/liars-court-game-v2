@@ -123,7 +123,7 @@ async function ensureGenLayerNetwork() {
                     chainName: "GenLayer Bradbury Testnet",
                     rpcUrls: [RPC_URL],
                     nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-                    blockExplorerUrls: ["https://studio.genlayer.com"],
+                    blockExplorerUrls: [],
                 }],
             });
         } else {
