@@ -78,75 +78,62 @@ const blockchain = {
 // ══════════════════════════════════
 //  REAL-TIME SYNC (THE "REAL" ONLINE)
 // ══════════════════════════════════
+// ══════════════════════════════════
+//  REAL-TIME SYNC (THE "REAL" ONLINE)
+// ══════════════════════════════════
 async function syncRoom() {
-    if (!state.currentRoomId) return;
+    if (state.currentRoomId === null) return;
 
-    // ✅ PRIMARY SYNC: Read from localStorage (shared between tabs/browsers on same device)
-    const stored = localStorage.getItem(`lc_room_${state.currentRoomId}`);
-    if (stored) {
-        const room = JSON.parse(stored);
+    // ✅ Sync directly from the Intelligent Contract (Online for everyone)
+    try {
+        const room = await blockchain.call("get_room", [parseInt(state.currentRoomId)]);
+        if (!room) return;
+
+        console.log("Online Sync...", room);
+        const oldPhase = state.currentPhase;
         state.roomData = room;
+        state.currentPhase = room.phase;
 
-        // Sync players grid
-        renderPlayerSlots(room.players, room.max_players || 4);
+        // 1. Update Header
+        $("#lobbyRoomName").textContent = `Court #${room.id}`;
+        $("#lobbyRoomCode").textContent = room.id;
+        $("#themeName").textContent = room.theme;
 
-        // Update start button
+        // 2. Sync Players Grid (Map dict to list for renderer)
+        const playersList = Object.keys(room.players);
+        renderPlayerSlots(playersList, 4);
+
+        // 3. Phase Transitions
+        if (oldPhase !== state.currentPhase) {
+            addLog(`Court moved to <span class="highlight">${state.currentPhase}</span> phase`);
+            showPhase(state.currentPhase);
+            if (state.currentPhase === "RESULTS") showResults(room.results, room.winner);
+        }
+
+        // 4. Update Start Button (First player is host)
         const startBtn = $("#startGameBtn");
-        const isHost = room.host === state.playerAddr;
-        if (isHost && state.currentPhase === "LOBBY") {
-            startBtn.disabled = room.players.length < 2;
-            startBtn.textContent = room.players.length < 2 ? `NEED 2+ PLAYERS (${room.players.length}/${room.max_players})` : "▶ START GAME";
-        } else if (!isHost && state.currentPhase === "LOBBY") {
+        const isHost = playersList[0]?.toLowerCase() === state.playerAddr.toLowerCase();
+        
+        if (isHost && state.currentPhase === "WAITING") {
+            startBtn.disabled = playersList.length < 2;
+            startBtn.textContent = playersList.length < 2 ? `WAITING FOR PLAYERS (${playersList.length}/2)` : "START GAME";
+        } else if (state.currentPhase === "WAITING") {
             startBtn.disabled = true;
             startBtn.textContent = "WAITING FOR HOST...";
+        } else {
+            startBtn.disabled = true;
+            startBtn.textContent = "IN PROGRESS";
         }
 
-        // Phase transition
-        if (room.phase && room.phase !== state.currentPhase && room.phase !== "LOBBY") {
-            addLog(`Court moved to <span class="highlight">${room.phase}</span> phase`);
-            showPhase(room.phase);
-        }
+    } catch (e) {
+        console.error("Sync Error:", e);
     }
 }
 
 function startPolling() {
     if (state.pollingInterval) clearInterval(state.pollingInterval);
-    state.pollingInterval = setInterval(syncRoom, 3000); // Poll every 3 seconds
+    state.pollingInterval = setInterval(syncRoom, 4000); // Sync every 4s
     syncRoom();
-}
-
-// ══════════════════════════════════
-//  UI RENDERING
-// ══════════════════════════════════
-function renderPlayerSlots(players = [], max = 4) {
-    const grid = $("#playersGrid");
-    let html = "";
-    const avatars = ["🦊", "🐺", "🦅", "🐲"];
-    
-    for (let i = 0; i < max; i++) {
-        const addr = players[i];
-        if (addr) {
-            const isYou = addr.toLowerCase() === state.playerAddr.toLowerCase();
-            const name = isYou ? "YOU" : shortAddr(addr);
-            html += `
-                <div class="player-slot occupied ${isYou ? 'you' : ''} animate-in">
-                    ${isYou ? '<div class="player-badge-you">HOST</div>' : ''}
-                    <div class="player-avatar">${avatars[i % 4]}</div>
-                    <div class="player-name">${name}</div>
-                    <div class="player-status"><span class="status-dot"></span> Online</div>
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="player-slot empty">
-                    <div class="player-avatar">❓</div>
-                    <div class="player-name" style="color: var(--text-dim);">Empty</div>
-                    <div class="player-status" style="color: var(--text-dim);">Waiting for player...</div>
-                </div>
-            `;
-        }
-    }
-    grid.innerHTML = html;
 }
 
 // ══════════════════════════════════
@@ -158,110 +145,43 @@ function closeCreateRoomModal() {
     m.style.display = "none";
 }
 
-function generateRoomCode() {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let code = "";
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-}
-
 async function createRoom() {
-    const name = $("#newRoomName").value.trim() || "Court " + Math.floor(Math.random() * 999);
-    const theme = state.selectedTheme;
-    const maxPlayers = parseInt($("#maxPlayersSelect").value) || 4;
-    const code = generateRoomCode();
-
-    // Close modal immediately
+    addLog(`Creating room on <span class="highlight">GenLayer</span>... Please wait.`);
     closeCreateRoomModal();
 
-    // Build local room state right away — no waiting for blockchain
-    state.currentRoomId = code;
-    state.roomData = {
-        id: code,
-        name: name,
-        theme: theme,
-        max_players: maxPlayers,
-        phase: "LOBBY",
-        players: [state.playerAddr || "0xYOU"],
-        host: state.playerAddr || "0xYOU"
-    };
+    try {
+        // 1. Send the transaction
+        await blockchain.write("create_room", [state.playerName]);
+        
+        // 2. Get the latest room ID (since total_rooms increased)
+        const total = await blockchain.call("total_rooms", []);
+        const newId = total - 1;
 
-    // Update UI immediately
-    $("#lobbyRoomName").textContent = name;
-    $("#lobbyRoomCode").textContent = code;
-    $("#themeName").textContent = theme;
-    const themeEmojis = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
-    $(".theme-icon").textContent = themeEmojis[theme] || "🌍";
-
-    // Update start button
-    const startBtn = $("#startGameBtn");
-    startBtn.disabled = true;
-    startBtn.textContent = "NEED 2+ PLAYERS";
-
-    // Render player slots
-    renderPlayerSlots([state.playerAddr || "0xYOU"], maxPlayers);
-
-    // Show the lobby
-    showPhase("LOBBY");
-
-    addLog(`Court <span class="highlight">${name}</span> opened! Code: <span class="highlight">${code}</span>`);
-    addLog(`Share code <span class="highlight">${code}</span> with friends to join!`);
-
-    // ✅ Save room to localStorage so other browsers can find it by code
-    localStorage.setItem(`lc_room_${code}`, JSON.stringify(state.roomData));
-
-    // Send TX to blockchain in background (non-blocking)
-    blockchain.write("create_room", [name, theme, maxPlayers]).then(tx => {
-        if (tx) addLog(`TX confirmed: <span class="highlight">${tx.hash.substring(0,12)}...</span>`);
-    });
-
-    // Poll to update players list from localStorage every 2s
-    startPolling();
+        state.currentRoomId = newId;
+        addLog(`New Court Created! Code: <span class="highlight">${newId}</span>`);
+        addLog(`Share the number <span class="highlight">${newId}</span> with your friends!`);
+        
+        showPhase("LOBBY");
+        startPolling();
+    } catch (e) {
+        alert("Failed to create room: " + e.message);
+    }
 }
 
 async function joinByCode() {
-    const code = $("#joinCodeInput").value.trim().toUpperCase();
-    if (!code || code.length < 4) {
-        alert("Enter a valid room code!");
-        return;
+    const code = $("#joinCodeInput").value.trim();
+    if (!code) return alert("Enter court number!");
+    
+    addLog(`Joining Court <span class="highlight">#${code}</span>...`);
+    
+    try {
+        await blockchain.write("join_room", [parseInt(code), state.playerName]);
+        state.currentRoomId = parseInt(code);
+        showPhase("LOBBY");
+        startPolling();
+    } catch (e) {
+        alert("Could not join: " + e.message);
     }
-    if (!state.connected) {
-        alert("Connect your wallet first!");
-        return;
-    }
-
-    // ✅ Look up room in localStorage (saved by host)
-    const stored = localStorage.getItem(`lc_room_${code}`);
-    if (!stored) {
-        alert(`Room "${code}" not found. Make sure the host opened the court first!`);
-        return;
-    }
-
-    const room = JSON.parse(stored);
-
-    // Add this player to the room
-    if (!room.players.includes(state.playerAddr)) {
-        room.players.push(state.playerAddr);
-        localStorage.setItem(`lc_room_${code}`, JSON.stringify(room));
-    }
-
-    // Set local state
-    state.currentRoomId = code;
-    state.roomData = room;
-
-    // Update UI
-    $("#lobbyRoomName").textContent = room.name;
-    $("#lobbyRoomCode").textContent = code;
-    $("#themeName").textContent = room.theme;
-    const themeEmojis = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
-    $(".theme-icon").textContent = themeEmojis[room.theme] || "🌍";
-
-    renderPlayerSlots(room.players, room.max_players || 4);
-    showPhase("LOBBY");
-
-    addLog(`Joined court <span class="highlight">${room.name}</span>!`);
-    blockchain.write("join_room", [code, state.playerName]);
-    startPolling();
 }
 
 async function joinRoom(id) {
