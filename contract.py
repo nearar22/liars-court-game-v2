@@ -193,6 +193,7 @@ Return ONLY the JSON object."""
         # ╔═══════════════════════════════════════════╗
         # ║  STEP 2: CALCULATE POINTS FOR ALL          ║
         # ╚═══════════════════════════════════════════╝
+        results = {}
         for addr, claim_data in room["claims"].items():
             is_actually_true = verdicts.get(addr, True) # Default to true if missing
             player_said_lie = claim_data["is_lie"]
