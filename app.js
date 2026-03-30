@@ -16,6 +16,7 @@ const RPC_URL          = "https://rpc-bradbury.genlayer.com";
 const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
+const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com";
 
 // ── STATE ──────────────────────────────────────────────
 let state = {
@@ -162,7 +163,7 @@ async function glWrite(fnName, args) {
             gas:   "0xC3500", // 800k gas
         }],
     });
-    addLog(`TX sent: <span class="highlight">${txHash.slice(0,12)}...</span>`);
+    addLog(`TX sent: <a href="${EXPLORER_URL}/tx/${txHash}" target="_blank" style="color:var(--gold);text-decoration:underline;">${txHash.slice(0,12)}...</a>`);
     return txHash;
 }
 
@@ -474,7 +475,7 @@ async function startGame() {
     try {
         // 1. Host creates the GenLayer room (1 tx)
         const txHash = await glWrite("create_room", [state.playerName]);
-        addLog(`GenLayer tx: <span class="highlight">${txHash.slice(0,12)}...</span>`);
+        addLog(`GenLayer tx: <a href="${EXPLORER_URL}/tx/${txHash}" target="_blank" style="color:var(--gold);text-decoration:underline;">${txHash.slice(0,12)}...</a>`);
 
         // 2. Poll for receipt & get room_id from return val
         addLog("Waiting for GenLayer confirmation...");
@@ -675,7 +676,7 @@ async function triggerGenLayerJudge(room) {
         // Step 2 – Trigger AI judging
         addLog("🧠 GenLayer AI is fact-checking...");
         const judgeTx = await glWrite("judge_claims", [glRoomId]);
-        addLog(`Judge TX: <span class="highlight">${judgeTx.slice(0,12)}...</span>`);
+        addLog(`Judge TX: <a href="${EXPLORER_URL}/tx/${judgeTx}" target="_blank" style="color:var(--gold);text-decoration:underline;">${judgeTx.slice(0,12)}...</a>`);
         addLog("Waiting for AI consensus (this may take ~30–60s)...");
 
         // Step 3 – Poll for result
