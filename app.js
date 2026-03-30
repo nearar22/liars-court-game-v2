@@ -259,8 +259,17 @@ function loadRoomList() {
         Object.entries(rooms).forEach(([id, room]) => {
             const phase = room.phase || "LOBBY";
             if (!["LOBBY","CLAIMING","VOTING"].includes(phase)) return;
+
+            // Auto-clean stale rooms (> 3 hours old)
+            if (room.createdAt && (Date.now() - room.createdAt > 3 * 60 * 60 * 1000)) {
+                db.ref("rooms/" + id).remove();
+                return;
+            }
+
             const pc = room.players ? Object.keys(room.players).length : 0;
+            const isMyRoom = room.host?.toLowerCase() === state.playerAddr.toLowerCase();
             found = true;
+
             const li = document.createElement("li");
             li.className = "room-item";
             li.innerHTML = `
@@ -268,8 +277,19 @@ function loadRoomList() {
                     <strong>${room.name || "Court"}</strong>
                     <span class="room-item-meta">${room.theme} · ${pc}/${room.maxPlayers||4} · ${phase}</span>
                 </div>
-                <button class="room-join-btn" data-id="${id}">JOIN</button>`;
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    ${isMyRoom ? `<button class="room-del-btn" style="background:var(--crimson);border:none;border-radius:6px;cursor:pointer;padding:0.4rem 0.6rem;font-size:0.9rem;" title="Delete this room">🗑️</button>` : ""}
+                    <button class="room-join-btn" data-id="${id}">JOIN</button>
+                </div>`;
+                
             li.querySelector(".room-join-btn").onclick = () => joinRoom(id);
+            if (isMyRoom) {
+                li.querySelector(".room-del-btn").onclick = () => {
+                    if (confirm("Are you sure you want to completely delete this court?")) {
+                        db.ref("rooms/" + id).remove();
+                    }
+                };
+            }
             list.appendChild(li);
         });
 
