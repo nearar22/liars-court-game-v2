@@ -177,80 +177,145 @@ function closeCreateRoomModal() {
     m.style.display = "none";
 }
 
-function generateRoomCode() {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let code = "";
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-}
-
 async function createRoom() {
-    const name = $("#newRoomName").value.trim() || "Court " + Math.floor(Math.random() * 999);
-    const theme = state.selectedTheme;
-    const code = generateRoomCode();
-
+    addLog(`Creating court on <span class="highlight">GenLayer</span>...`);
     closeCreateRoomModal();
 
-    const roomData = {
-        id: code,
-        name: name,
-        theme: theme,
-        phase: "LOBBY",
-        host: state.playerAddr,
-        players: {
-            [state.playerAddr]: {
-                name: state.playerName,
-                address: state.playerAddr
+    try {
+        // 1. Create on Blockchain
+        await blockchain.write("create_room", [state.playerName]);
+        
+        // 2. Get the actual ID
+        const total = await blockchain.call("total_rooms", []);
+        const roomId = total - 1;
+
+        const roomData = {
+            id: roomId,
+            name: $("#newRoomName").value.trim() || `Court #${roomId}`,
+            theme: state.selectedTheme,
+            phase: "LOBBY",
+            host: state.playerAddr,
+            players: {
+                [state.playerAddr]: {
+                    name: state.playerName,
+                    address: state.playerAddr
+                }
             }
-        }
-    };
+        };
 
-    // Save to Firebase
-    await db.ref('rooms/' + code).set(roomData);
+        // 3. Sync to Firebase
+        await db.ref('rooms/' + roomId).set(roomData);
 
-    state.currentRoomId = code;
-    showPhase("LOBBY");
-    startPolling();
-    
-    addLog(`Court <span class="highlight">${name}</span> opened via Firebase!`);
+        state.currentRoomId = roomId;
+        showPhase("LOBBY");
+        startPolling();
+        
+        addLog(`Court <span class="highlight">#${roomId}</span> is now ONLINE!`);
+    } catch (e) {
+        alert("GenLayer Error: " + e.message);
+    }
 }
 
 async function joinByCode() {
     const code = $("#joinCodeInput").value.trim();
-    if (!code) return alert("Enter court number!");
+    if (!code || isNaN(code)) return alert("Enter court number!");
     
+    if (!state.connected) return alert("Connect wallet first!");
+
     addLog(`Joining Court <span class="highlight">#${code}</span>...`);
-    
+
     try {
+        // 1. Join on Blockchain
         await blockchain.write("join_room", [parseInt(code), state.playerName]);
-        state.currentRoomId = parseInt(code);
+
+        // 2. Sync player to Firebase
+        await db.ref(`rooms/${code}/players/${state.playerAddr}`).set({
+            name: state.playerName,
+            address: state.playerAddr
+        });
+
+        state.currentRoomId = code;
         showPhase("LOBBY");
         startPolling();
+        
+        addLog(`Successfully joined Court <span class="highlight">#${code}</span>!`);
     } catch (e) {
-        alert("Could not join: " + e.message);
+        alert("Join Error: " + e.message);
     }
 }
 
-async function joinRoom(id) {
-    state.currentRoomId = id;
-    startPolling();
-}
-
 async function startGame() {
-    await blockchain.write("start_game", [state.currentRoomId]);
+    if (!state.currentRoomId) return;
+    addLog("Starting Court Session...");
+    
+    // Update Firebase for immediate UI change
+    await db.ref('rooms/' + state.currentRoomId).update({ phase: "CLAIMING" });
+    
+    // Notify GenLayer (The Judge)
+    blockchain.write("start_game", [state.currentRoomId]);
 }
 
 async function submitClaim() {
     const text = $("#claimInput").value.trim();
+    if (!text) return alert("Write your claim!");
     const isLie = $("#isLieToggle").checked;
+    
+    addLog(`Submitting claim to <span class="highlight">GenLayer Judge</span>...`);
+    
+    // 1. Submit to Blockchain
     await blockchain.write("submit_claim", [state.currentRoomId, text, isLie]);
+    
+    // 2. Mark as submitted in Firebase (so others see you are ready)
+    await db.ref(`rooms/${state.currentRoomId}/players/${state.playerAddr}`).update({
+        hasSubmitted: true
+    });
+
     state.myClaim = { text, isLie };
     showPhase("WAITING");
+    
+    // Check if all players in Firebase submitted to move phase
+    const snapshot = await db.ref(`rooms/${state.currentRoomId}`).once('value');
+    const room = snapshot.val();
+    const players = Object.values(room.players);
+    if (players.every(p => p.hasSubmitted)) {
+        await db.ref(`rooms/${state.currentRoomId}`).update({ phase: "VOTING" });
+    }
 }
 
 async function submitVotes() {
+    addLog("Casting votes...");
+    
+    // 1. Submit to Blockchain
     await blockchain.write("submit_votes", [state.currentRoomId, JSON.stringify(state.myVotes)]);
+    
+    // 2. Mark in Firebase
+    await db.ref(`rooms/${state.currentRoomId}/players/${state.playerAddr}`).update({
+        hasVoted: true
+    });
+
     showPhase("JUDGING");
+
+    // Check if all voted to move to Judging
+    const snapshot = await db.ref(`rooms/${state.currentRoomId}`).once('value');
+    const room = snapshot.val();
+    const players = Object.values(room.players);
+    if (players.every(p => p.hasVoted)) {
+        await db.ref(`rooms/${state.currentRoomId}`).update({ phase: "JUDGING" });
+        
+        // Trigger GenLayer AI Judge
+        addLog(`AI Judge is searching for evidence...`);
+        const results = await blockchain.write("judge_claims", [state.currentRoomId]);
+        
+        // Final Results to Firebase
+        if (results) {
+            const finalRoom = await blockchain.call("get_room", [state.currentRoomId]);
+            await db.ref(`rooms/${state.currentRoomId}`).update({ 
+                phase: "RESULTS",
+                results: finalRoom.results,
+                winner: finalRoom.winner
+            });
+        }
+    }
 }
 
 function showResults(results, winner) {
