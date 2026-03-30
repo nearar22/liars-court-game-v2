@@ -46,22 +46,7 @@ function addLog(msg) {
     if (log.children.length > 25) log.lastChild.remove();
 }
 
-// UI Loading helpers
-function showLoadingBanner(text) {
-    const banner = $("#judgingSection");
-    if (!banner) return;
-    const txt = $("#judgingLoadingText");
-    if (txt) txt.textContent = text;
-    banner.style.display = "block";
-    
-    // Auto-scroll to loading section
-    banner.scrollIntoView({ behavior: 'smooth' });
-}
-
-function hideLoadingBanner() {
-    const banner = $("#judgingSection");
-    if (banner) banner.style.display = "none";
-}
+// (showLoadingBanner / hideLoadingBanner defined below, near line 790)
 
 // ══════════════════════════════════════════════════════
 //  FIREBASE SETUP
@@ -124,7 +109,7 @@ async function ensureGenLayerNetwork() {
                     chainName: "GenLayer Bradbury Testnet",
                     rpcUrls: [RPC_URL],
                     nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-                    blockExplorerUrls: [],
+                    blockExplorerUrls: [EXPLORER_URL],
                 }],
             });
         } else {
@@ -306,7 +291,8 @@ function loadRoomList() {
 function closeModal() {
     const m = $("#createRoomModal");
     m.classList.remove("visible");
-    m.style.display = "none";
+    // Let CSS handle the fade out, then hide
+    setTimeout(() => { if (!m.classList.contains("visible")) m.style.display = "none"; }, 350);
 }
 
 async function createRoom() {
@@ -519,24 +505,34 @@ async function submitClaim() {
     if (!text) return alert("Write your claim!");
     const isLie = $("#isLieToggle").checked;
 
-    // Save to Firebase
-    await db.ref(`rooms/${state.currentRoomId}/claims/${state.playerAddr}`).set({
-        text, isLie, username: state.playerName
-    });
-    state.myClaim = { text, isLie };
-    addLog("Claim submitted!");
+    const btn = $("#submitClaimBtn");
+    btn.disabled = true;
+    btn.textContent = "SUBMITTING...";
 
-    // Check if all players submitted
-    const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
-    const room  = snap.val();
-    const pc    = Object.keys(room.players).length;
-    const cc    = room.claims ? Object.keys(room.claims).length : 0;
+    try {
+        // Save to Firebase
+        await db.ref(`rooms/${state.currentRoomId}/claims/${state.playerAddr}`).set({
+            text, isLie, username: state.playerName
+        });
+        state.myClaim = { text, isLie };
+        addLog("Claim submitted!");
 
-    if (cc >= pc) {
-        await db.ref("rooms/" + state.currentRoomId).update({ phase: "VOTING" });
-    } else {
-        showPhase("WAITING");
-        $("#waitingText").textContent = `Waiting for ${pc - cc} more player(s) to submit...`;
+        // Check if all players submitted
+        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
+        const room  = snap.val();
+        const pc    = Object.keys(room.players).length;
+        const cc    = room.claims ? Object.keys(room.claims).length : 0;
+
+        if (cc >= pc) {
+            await db.ref("rooms/" + state.currentRoomId).update({ phase: "VOTING" });
+        } else {
+            showPhase("WAITING");
+            $("#waitingText").textContent = `Waiting for ${pc - cc} more player(s) to submit...`;
+        }
+    } catch (err) {
+        addLog(`❌ Error: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = "SUBMIT TO COURT";
     }
 }
 
@@ -618,26 +614,36 @@ function buildVotingUI(claims) {
 async function submitVotes() {
     if (Object.keys(state.myVotes).length === 0) return alert("Vote on at least one claim!");
 
-    await db.ref(`rooms/${state.currentRoomId}/votes/${state.playerAddr}`).set(state.myVotes);
-    addLog("Votes submitted!");
+    const btn = $("#submitVotesBtn");
+    btn.disabled = true;
+    btn.textContent = "SUBMITTING...";
 
-    const snap  = await db.ref("rooms/" + state.currentRoomId).once("value");
-    const room  = snap.val();
-    const pc    = Object.keys(room.players).length;
-    const vc    = room.votes ? Object.keys(room.votes).length : 0;
+    try {
+        await db.ref(`rooms/${state.currentRoomId}/votes/${state.playerAddr}`).set(state.myVotes);
+        addLog("Votes submitted!");
 
-    if (vc >= pc) {
-        // All voted — move to JUDGING phase
-        await db.ref("rooms/" + state.currentRoomId).update({ phase: "JUDGING" });
-        addLog("All voted! AI Judge is analyzing...");
+        const snap  = await db.ref("rooms/" + state.currentRoomId).once("value");
+        const room  = snap.val();
+        const pc    = Object.keys(room.players).length;
+        const vc    = room.votes ? Object.keys(room.votes).length : 0;
 
-        // Host triggers GenLayer judge
-        if (state.isHost) {
-            await triggerGenLayerJudge(room);
+        if (vc >= pc) {
+            // All voted — move to JUDGING phase
+            await db.ref("rooms/" + state.currentRoomId).update({ phase: "JUDGING" });
+            addLog("All voted! AI Judge is analyzing...");
+
+            // Host triggers GenLayer judge
+            if (state.isHost) {
+                await triggerGenLayerJudge(room);
+            }
+        } else {
+            showPhase("WAITING");
+            $("#waitingText").textContent = `Waiting for ${pc - vc} more player(s) to vote...`;
         }
-    } else {
-        showPhase("WAITING");
-        $("#waitingText").textContent = `Waiting for ${pc - vc} more player(s) to vote...`;
+    } catch (err) {
+        addLog(`❌ Error: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = "SUBMIT VERDICT";
     }
 }
 
@@ -655,16 +661,19 @@ async function triggerGenLayerJudge(room) {
     }
 
     try {
-        // Step 1 – Submit ALL claims to GenLayer contract (if not already done)
+        // Step 1 – Submit the host's claim to GenLayer contract
         const claims  = room.claims || {};
         const votes   = room.votes  || {};
 
-        // In a real GenLayer flow, everyone would submit their own claims.
-        // For UX, since the host is triggering this, we'll try submitting for you.
-        for (const [addr, claim] of Object.entries(claims)) {
-            if (addr.toLowerCase() === state.playerAddr.toLowerCase()) {
-                addLog(`Submitting your claim to GenLayer...`);
-                await glWrite("submit_claim", [glRoomId, claim.text, claim.isLie]);
+        // Submit the host's own claim to GenLayer
+        const hostClaim = claims[state.playerAddr];
+        if (hostClaim) {
+            addLog(`Submitting your claim to GenLayer...`);
+            try {
+                await glWrite("submit_claim", [glRoomId, hostClaim.text, hostClaim.isLie]);
+            } catch (e) {
+                // Ignore "already submitted" errors
+                if (!e.message.includes("already")) addLog(`⚠️ Claim submit: ${e.message}`);
             }
         }
 
@@ -712,6 +721,12 @@ async function triggerGenLayerJudge(room) {
 
         hideLoadingBanner();
         addLog("🏆 GenLayer Results saved!");
+        // Update leaderboard with game results
+        updateLeaderboard(enrichedResults);
+        // Update winner's wins count
+        if (winner) {
+            db.ref(`leaderboard/${winner}/wins`).transaction(w => (w || 0) + 1);
+        }
 
     } catch (err) {
         console.error("GenLayer judge error:", err);
@@ -858,9 +873,19 @@ function setupEventListeners() {
     const playAgain = $("#playAgainBtn");
     if (playAgain) playAgain.onclick = () => {
         $("#resultsOverlay").classList.remove("visible");
+        // Reset ALL state for clean new game
+        if (_roomListener) { db.ref("rooms/" + _roomListener).off(); _roomListener = null; }
         state.currentRoomId = null;
         state.currentPhase  = "LOBBY";
+        state.roomData      = null;
+        state.myClaim       = null;
+        state.myVotes       = {};
+        state.isHost        = false;
+        state._judging      = false;
+        hideLoadingBanner();
         showPhase("LOBBY");
+        // Refresh room list
+        loadRoomList();
     };
 
     $$("#themeOptions .theme-option").forEach(opt => {
@@ -884,6 +909,52 @@ function setupEventListeners() {
 document.addEventListener("DOMContentLoaded", () => {
     setupEventListeners();
     loadRoomList();
-    addLog(`Bradbury Testnet <span class="highlight">Hybrid Engine</span> Ready.`);
+    loadLeaderboard();
+    addLog(`Bradbury Testnet <span class="highlight">GenLayer Engine</span> Ready.`);
     showPhase("LOBBY");
 });
+
+// ══════════════════════════════════════════════════════
+//  LEADERBOARD
+// ══════════════════════════════════════════════════════
+function loadLeaderboard() {
+    db.ref("leaderboard").orderByChild("score").limitToLast(5).on("value", snap => {
+        const data = snap.val() || {};
+        const lb = $("#leaderboard");
+        if (!lb) return;
+
+        const entries = Object.entries(data)
+            .map(([addr, d]) => ({ addr, score: d.score || 0, wins: d.wins || 0, name: d.name || shortAddr(addr) }))
+            .sort((a, b) => b.score - a.score);
+
+        if (entries.length === 0) {
+            lb.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;text-align:center;padding:1rem;">No scores yet. Play a game!</div>';
+            return;
+        }
+
+        let html = "";
+        entries.forEach((e, i) => {
+            const rankClass = i < 3 ? `rank-${i+1}` : "";
+            html += `<div class="lb-entry">
+                <div class="lb-rank ${rankClass}">${i+1}</div>
+                <div class="lb-name">${e.name}</div>
+                <div class="lb-score">${e.score} pts · ${e.wins}W</div>
+            </div>`;
+        });
+        lb.innerHTML = html;
+    });
+}
+
+// Update leaderboard after game results
+function updateLeaderboard(results) {
+    if (!results) return;
+    for (const [addr, res] of Object.entries(results)) {
+        const ref = db.ref(`leaderboard/${addr}`);
+        ref.transaction(current => {
+            if (!current) current = { score: 0, wins: 0, name: res.username || shortAddr(addr) };
+            current.score = (current.score || 0) + (res.points || 0);
+            current.name  = res.username || current.name;
+            return current;
+        });
+    }
+}

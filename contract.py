@@ -155,47 +155,50 @@ class LiarsCourt(gl.Contract):
         if room["phase"] != "JUDGING":
             raise gl.vm.UserError("Not in judging phase")
 
-        results = {}
+        # ╔═══════════════════════════════════════════╗
+        # ║  STEP 1: PREPARE BATCH PROMPT             ║
+        # ╚═══════════════════════════════════════════╝
+        claims_summary = ""
+        for i, (addr, claim_data) in enumerate(room["claims"].items()):
+            claims_summary += f"PLAYER_{i+1} ({addr}): \"{claim_data['text']}\"\n"
 
+        batch_prompt = f"""You are a fact-checker judge in a game called "Liar's Court".
+THEME: {room["theme"]}
+
+CLAIMS TO CHECK:
+{claims_summary}
+
+任务: For each player's claim, determine if it is factually TRUE or FALSE based on your general knowledge and the theme.
+Respond with a JSON object where keys are the player addresses and values are booleans (true for factually true, false for factually false).
+Example: {{"0xAddr1": true, "0xAddr2": false}}
+Return ONLY the JSON object."""
+
+        # Use Equivalence Principle for consensus on the whole batch
+        verdicts_json = gl.eq_principle.prompt_non_comparative(
+            batch_prompt,
+            expected_type=str,
+        )
+        
+        # Clean potential markdown from LLM
+        verdicts_json = verdicts_json.strip()
+        if verdicts_json.startswith("```json"): verdicts_json = verdicts_json[7:]
+        if verdicts_json.endswith("```"): verdicts_json = verdicts_json[:-3]
+        
+        try:
+            verdicts = json.loads(verdicts_json)
+        except:
+            # Fallback if AI fails to return proper JSON
+            verdicts = {}
+
+        # ╔═══════════════════════════════════════════╗
+        # ║  STEP 2: CALCULATE POINTS FOR ALL          ║
+        # ╚═══════════════════════════════════════════╝
         for addr, claim_data in room["claims"].items():
-            claim_text = claim_data["text"]
-
-            # ╔═══════════════════════════════════════════╗
-            # ║  STEP 1: SEARCH THE WEB FOR EVIDENCE      ║
-            # ╚═══════════════════════════════════════════╝
-            search_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={claim_text}&format=json&utf8=1"
-            web_response = gl.nondet.web.get(search_url)
-            web_evidence = web_response.text[:2000]  # Limit size
-
-            # ╔═══════════════════════════════════════════╗
-            # ║  STEP 2: AI ANALYZES THE CLAIM             ║
-            # ╚═══════════════════════════════════════════╝
-            analysis_prompt = f"""You are a fact-checker judge in a game called "Liar's Court".
-
-CLAIM: "{claim_text}"
-TOPIC: {room["theme"]}
-
-WEB EVIDENCE (from Wikipedia API):
-{web_evidence}
-
-Based on the evidence above, is this claim TRUE or FALSE?
-Respond with ONLY one word: TRUE or FALSE"""
-
-            # Use Equivalence Principle so all validators agree
-            verdict = gl.eq_principle.prompt_non_comparative(
-                analysis_prompt,
-                expected_type=str,
-            )
-
-            is_actually_true = "TRUE" in verdict.upper()
-
-            # ╔═══════════════════════════════════════════╗
-            # ║  STEP 3: CALCULATE POINTS                  ║
-            # ╚═══════════════════════════════════════════╝
+            is_actually_true = verdicts.get(addr, True) # Default to true if missing
             player_said_lie = claim_data["is_lie"]
             points = 0
 
-            # Count how many players voted this claim as a LIE
+            # Count votes
             lie_votes = 0
             for voter, voter_votes in room["votes"].items():
                 if voter != addr and addr in voter_votes:
@@ -206,17 +209,13 @@ Respond with ONLY one word: TRUE or FALSE"""
             was_caught = lie_votes > (total_other_players / 2)
 
             if player_said_lie and not was_caught:
-                # Lied successfully! Nobody caught you
-                points = 3
+                points = 3 # Successful lie
             elif player_said_lie and was_caught:
-                # Lied but got caught
-                points = -1
+                points = -1 # Caught lying
             elif not player_said_lie and not is_actually_true:
-                # Said truth but AI says it's false (player was wrong)
-                points = -1
+                points = -1 # Wrong truth
             elif not player_said_lie and is_actually_true:
-                # Told the truth and it checks out
-                points = 1
+                points = 1 # Truth confirmed
 
             results[addr] = {
                 "verdict": is_actually_true,
@@ -224,16 +223,14 @@ Respond with ONLY one word: TRUE or FALSE"""
                 "was_caught": was_caught,
                 "lie_votes": lie_votes,
                 "points": points,
-                "ai_evidence": web_evidence[:200],
             }
 
-            # Update global scores
-            current_score = 0
+            # Update scores
             try:
-                current_score = self.scores[Address(bytes.fromhex(addr[2:]))]
+                p_addr = Address(bytes.fromhex(addr[2:]))
+                self.scores[p_addr] = (self.scores[p_addr] or 0) + points
             except:
                 pass
-            self.scores[Address(bytes.fromhex(addr[2:]))] = current_score + points
 
         # Assign voter points (for correct guesses)
         for voter, voter_votes in room["votes"].items():

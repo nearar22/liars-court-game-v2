@@ -196,7 +196,14 @@ body {
 .room-item:hover { border-color: var(--border-hover); background: var(--bg-card-hover); transform: translateX(4px); }
 .room-item.active { border-color: var(--gold); background: var(--gold-glow); }
 
-.room-name { font-weight: 600; font-size: 0.85rem; }
+.room-name { 
+    font-weight: 600; 
+    font-size: 0.85rem; 
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
 .room-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
 
 .room-badge {
@@ -615,15 +622,15 @@ body {
     position: fixed; inset: 0;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(10px);
-    display: none; /* Changed from display: flex to none */
+    display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 999; /* Increased z-index */
+    z-index: 999;
     opacity: 0;
+    pointer-events: none;
     transition: opacity 0.3s ease;
 }
 .modal-overlay.visible { 
-    display: flex; /* Show when visible */
     opacity: 1; 
     pointer-events: all; 
 }
@@ -820,12 +827,27 @@ body {
    RESPONSIVE
    ══════════════════ */
 @media (max-width: 900px) {
-    .app { grid-template-columns: 1fr; }
+    .app { 
+        grid-template-columns: 1fr; 
+        padding: 1rem;
+        gap: 1rem;
+    }
+    .sidebar {
+        order: 2; /* Move sidebar below game area on mobile */
+    }
+    .game-area {
+        order: 1;
+    }
     .players-grid { grid-template-columns: repeat(2, 1fr); }
     .header { padding: 0.8rem 1rem; }
     .theme-options { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 500px) {
     .players-grid { grid-template-columns: 1fr; }
-    .phase-bar { flex-wrap: wrap; }
+    .phase-bar { 
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.4rem;
+    }
+    .phase-step { font-size: 0.65rem; padding: 0.4rem; }
 }
