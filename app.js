@@ -81,39 +81,31 @@ const blockchain = {
 async function syncRoom() {
     if (!state.currentRoomId) return;
 
-    // Fetch the LATEST state from the Intelligent Contract
-    const room = await blockchain.call("get_room", [state.currentRoomId]);
-    if (!room) return;
+    // ✅ PRIMARY SYNC: Read from localStorage (shared between tabs/browsers on same device)
+    const stored = localStorage.getItem(`lc_room_${state.currentRoomId}`);
+    if (stored) {
+        const room = JSON.parse(stored);
+        state.roomData = room;
 
-    console.log("Syncing with Blockchain...", room);
-    const oldPhase = state.currentPhase;
-    state.roomData = room;
-    state.currentPhase = room.phase;
+        // Sync players grid
+        renderPlayerSlots(room.players, room.max_players || 4);
 
-    // 1. Update Room Header
-    $("#lobbyRoomName").textContent = room.name || "Liar's Court";
-    $("#lobbyRoomCode").textContent = room.id;
-    $("#themeName").textContent = room.theme;
+        // Update start button
+        const startBtn = $("#startGameBtn");
+        const isHost = room.host === state.playerAddr;
+        if (isHost && state.currentPhase === "LOBBY") {
+            startBtn.disabled = room.players.length < 2;
+            startBtn.textContent = room.players.length < 2 ? `NEED 2+ PLAYERS (${room.players.length}/${room.max_players})` : "▶ START GAME";
+        } else if (!isHost && state.currentPhase === "LOBBY") {
+            startBtn.disabled = true;
+            startBtn.textContent = "WAITING FOR HOST...";
+        }
 
-    // 2. Sync Players Grid
-    renderPlayerSlots(room.players, room.max_players || 4);
-
-    // 3. Phase Transitions
-    if (oldPhase !== state.currentPhase) {
-        addLog(`Court moved to <span class="highlight">${state.currentPhase}</span> phase`);
-        showPhase(state.currentPhase);
-        if (state.currentPhase === "RESULTS") showResults(room.results, room.winner);
-    }
-
-    // 4. Update Start Button (Host only)
-    const startBtn = $("#startGameBtn");
-    const isHost = room.players[0] === state.playerAddr;
-    if (isHost && state.currentPhase === "LOBBY") {
-        startBtn.disabled = room.players.length < 2;
-        startBtn.textContent = room.players.length < 2 ? "NEED 2+ PLAYERS" : "START GAME";
-    } else {
-        startBtn.disabled = true;
-        startBtn.textContent = state.currentPhase === "LOBBY" ? "WAITING FOR HOST..." : "IN PROGRESS";
+        // Phase transition
+        if (room.phase && room.phase !== state.currentPhase && room.phase !== "LOBBY") {
+            addLog(`Court moved to <span class="highlight">${room.phase}</span> phase`);
+            showPhase(room.phase);
+        }
     }
 }
 
@@ -215,17 +207,64 @@ async function createRoom() {
     addLog(`Court <span class="highlight">${name}</span> opened! Code: <span class="highlight">${code}</span>`);
     addLog(`Share code <span class="highlight">${code}</span> with friends to join!`);
 
+    // ✅ Save room to localStorage so other browsers can find it by code
+    localStorage.setItem(`lc_room_${code}`, JSON.stringify(state.roomData));
+
     // Send TX to blockchain in background (non-blocking)
     blockchain.write("create_room", [name, theme, maxPlayers]).then(tx => {
         if (tx) addLog(`TX confirmed: <span class="highlight">${tx.hash.substring(0,12)}...</span>`);
     });
 
-    // Start polling for new players joining
+    // Poll to update players list from localStorage every 2s
+    startPolling();
+}
+
+async function joinByCode() {
+    const code = $("#joinCodeInput").value.trim().toUpperCase();
+    if (!code || code.length < 4) {
+        alert("Enter a valid room code!");
+        return;
+    }
+    if (!state.connected) {
+        alert("Connect your wallet first!");
+        return;
+    }
+
+    // ✅ Look up room in localStorage (saved by host)
+    const stored = localStorage.getItem(`lc_room_${code}`);
+    if (!stored) {
+        alert(`Room "${code}" not found. Make sure the host opened the court first!`);
+        return;
+    }
+
+    const room = JSON.parse(stored);
+
+    // Add this player to the room
+    if (!room.players.includes(state.playerAddr)) {
+        room.players.push(state.playerAddr);
+        localStorage.setItem(`lc_room_${code}`, JSON.stringify(room));
+    }
+
+    // Set local state
+    state.currentRoomId = code;
+    state.roomData = room;
+
+    // Update UI
+    $("#lobbyRoomName").textContent = room.name;
+    $("#lobbyRoomCode").textContent = code;
+    $("#themeName").textContent = room.theme;
+    const themeEmojis = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
+    $(".theme-icon").textContent = themeEmojis[room.theme] || "🌍";
+
+    renderPlayerSlots(room.players, room.max_players || 4);
+    showPhase("LOBBY");
+
+    addLog(`Joined court <span class="highlight">${room.name}</span>!`);
+    blockchain.write("join_room", [code, state.playerName]);
     startPolling();
 }
 
 async function joinRoom(id) {
-    await blockchain.write("join_room", [id, state.playerName]);
     state.currentRoomId = id;
     startPolling();
 }
@@ -323,6 +362,12 @@ function setupEventListeners() {
     $("#startGameBtn").onclick = startGame;
     $("#submitClaimBtn").onclick = submitClaim;
     $("#submitVotesBtn").onclick = submitVotes;
+    $("#joinByCodeBtn").onclick = joinByCode;
+    $("#copyCodeBtn") && ($("#copyCodeBtn").onclick = () => {
+        navigator.clipboard.writeText(state.currentRoomId || "");
+        $("#copyCodeBtn").textContent = "✅ Copied!";
+        setTimeout(() => $("#copyCodeBtn").textContent = "📋 Copy", 2000);
+    });
     
     $$("#themeOptions .theme-option").forEach(opt => {
         opt.onclick = () => {
