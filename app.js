@@ -250,12 +250,9 @@ function setupEventListeners() {
     $("#connectWalletBtn").onclick = connectWallet;
     const createModal = $("#createRoomModal");
     $("#createRoomBtn").addEventListener("click", () => {
-        if (!state.connected) {
-            alert("⚠️ Please CONNECT WALLET first to open a new court.");
-            return;
-        }
+        console.log("Create Room Button Clicked");
         createModal.classList.add("visible");
-        createModal.style.display = "flex"; // Double check display
+        createModal.style.display = "flex";
         createModal.style.opacity = "1";
     });
     
@@ -263,7 +260,14 @@ function setupEventListeners() {
         createModal.classList.remove("visible");
         createModal.style.display = "none";
     });
-    $("#confirmCreateBtn").onclick = createRoom;
+    
+    $("#confirmCreateBtn").onclick = () => {
+        if (!state.connected) {
+            alert("⚠️ Please CONNECT WALLET first to submit to GenLayer!");
+            return;
+        }
+        createRoom();
+    };
     $("#startGameBtn").onclick = startGame;
     $("#submitClaimBtn").onclick = submitClaim;
     $("#submitVotesBtn").onclick = submitVotes;
