@@ -694,41 +694,49 @@ async function triggerAIJudge(room) {
 // ══════════════════════════════════════════════════════
 async function pollinationsFactCheck(claims, theme) {
     const verdicts = {};
-    const promises = [];
 
     for (const [addr, claim] of Object.entries(claims)) {
         const textToAnalyze = claim.text;
         
-        // Construct a highly strict prompt that forces a TRUE/FALSE output
+        // Strict prompt preventing hallucination
         const prompt = `You are a strict trivia fact-checker. Determine if the following claim about the theme "${theme}" is factually true or false in the real world.
 Claim: "${textToAnalyze}"
 Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctuation.`;
 
-        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt);
+        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt) + '?model=mistral';
         
-        const promise = fetch(url)
-            .then(res => res.text())
-            .then(response => {
-                const answer = response.toUpperCase().trim();
-                // We default to true if the AI gives a weird unclear answer, but strict prompt usually prevents it.
-                if (answer.includes("FALSE")) {
-                    verdicts[addr] = false;
-                } else if (answer.includes("TRUE")) {
-                    verdicts[addr] = true;
-                } else {
-                    verdicts[addr] = true; // Default fallback
-                }
-            })
-            .catch(err => {
-                console.error("Pollinations AI error:", err);
-                verdicts[addr] = true; // Default fallback on network error
-            });
+        try {
+            console.log("AI checking claim:", textToAnalyze);
+            const res = await fetch(url);
             
-        promises.push(promise);
+            if (!res.ok) {
+                console.error("AI API returned status:", res.status);
+                // Fallback to random if API fails heavily
+                verdicts[addr] = Math.random() > 0.5;
+                continue;
+            }
+            
+            const responseText = await res.text();
+            console.log("AI Response:", responseText);
+            
+            const answer = responseText.toUpperCase().trim();
+            if (answer.includes("FALSE")) {
+                verdicts[addr] = false;
+            } else if (answer.includes("TRUE")) {
+                verdicts[addr] = true;
+            } else {
+                verdicts[addr] = false; // Safest default for weird AI outputs
+            }
+            
+            // Wait a small bit to avoid rate limits on the free API
+            await new Promise(r => setTimeout(r, 600));
+            
+        } catch (err) {
+            console.error("Pollinations AI network error:", err);
+            verdicts[addr] = false; // Default fallback
+        }
     }
     
-    // Wait for all AI calls to finish concurrently
-    await Promise.all(promises);
     return verdicts;
 }
 
