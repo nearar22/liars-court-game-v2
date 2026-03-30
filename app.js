@@ -416,12 +416,51 @@ function renderPlayers(players, max, host) {
 }
 
 // ══════════════════════════════════════════════════════
-//  START GAME
+//  START GAME (GENLAYER EXCLUSIVE)
 // ══════════════════════════════════════════════════════
 async function startGame() {
     if (!state.currentRoomId || !state.isHost) return;
-    addLog("Game started! Submit your claims.");
-    await db.ref("rooms/" + state.currentRoomId).update({ phase: "CLAIMING" });
+
+    addLog("Starting game — creating GenLayer room...");
+    showLoadingBanner("Creating game on GenLayer...");
+
+    try {
+        // 1. Host creates the GenLayer room (1 tx)
+        const txHash = await glWrite("create_room", [state.playerName]);
+        addLog(`GenLayer tx: <span class="highlight">${txHash.slice(0,12)}...</span>`);
+
+        // 2. Poll for receipt & get room_id from return val
+        addLog("Waiting for GenLayer confirmation...");
+        let glRoomId = -1;
+        try {
+            const receipt = await pollTxResult(txHash, 90000);
+            if (receipt?.output !== undefined) glRoomId = parseInt(receipt.output);
+        } catch (_) {
+            // Fallback: use total_rooms - 1 if polling fails to parse the ID
+            try {
+                const total = await glRead("gen_call", [{
+                    to: CONTRACT_ADDRESS,
+                    data: JSON.stringify({ fn: "total_rooms", args: [] })
+                }, "latest"]);
+                glRoomId = Math.max(0, parseInt(total) - 1);
+            } catch (_2) { glRoomId = 0; }
+        }
+
+        addLog(`GenLayer room ID: <span class="highlight">#${glRoomId}</span>`);
+
+        // 3. Save glRoomId to Firebase + move to CLAIMING
+        await db.ref("rooms/" + state.currentRoomId).update({
+            phase:    "CLAIMING",
+            glRoomId: glRoomId,
+        });
+
+        hideLoadingBanner();
+        addLog("Game started! Submit your claims.");
+    } catch (err) {
+        hideLoadingBanner();
+        addLog(`❌ GenLayer Error: ${err.message}. Please try again.`);
+        console.error("GenLayer start error:", err);
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -559,13 +598,11 @@ async function submitVotes() {
 // ══════════════════════════════════════════════════════
 async function triggerGenLayerJudge(room) {
     const glRoomId = room.glRoomId;
-    showLoadingBanner("🤖 AI Judge consulting the internet...");
+    showLoadingBanner("🤖 AI Judge consulting GenLayer...");
 
-    // If no valid GenLayer room, fallback to local scoring
     if (glRoomId === undefined || glRoomId < 0) {
-        addLog("⚠️ No GenLayer room — using local scoring...");
+        addLog("❌ Critical Error: No GenLayer room found. Cannot proceed without the GenLayer network.");
         hideLoadingBanner();
-        await calculateResultsLocally(room);
         return;
     }
 
@@ -574,7 +611,8 @@ async function triggerGenLayerJudge(room) {
         const claims  = room.claims || {};
         const votes   = room.votes  || {};
 
-        // Submit each player's claim to GenLayer
+        // In a real GenLayer flow, everyone would submit their own claims.
+        // For UX, since the host is triggering this, we'll try submitting for you.
         for (const [addr, claim] of Object.entries(claims)) {
             if (addr.toLowerCase() === state.playerAddr.toLowerCase()) {
                 addLog(`Submitting your claim to GenLayer...`);
@@ -583,6 +621,7 @@ async function triggerGenLayerJudge(room) {
         }
 
         // Submit votes to GenLayer
+
         addLog("Submitting votes to GenLayer...");
         await glWrite("submit_votes", [glRoomId, JSON.stringify(state.myVotes)]);
 
@@ -624,270 +663,13 @@ async function triggerGenLayerJudge(room) {
         });
 
         hideLoadingBanner();
-        addLog("🏆 Results saved!");
+        addLog("🏆 GenLayer Results saved!");
 
     } catch (err) {
         console.error("GenLayer judge error:", err);
-        addLog(`⚠️ GenLayer error: ${err.message} — using local scoring.`);
+        addLog(`❌ GenLayer error: ${err.message}. Network might be congested.`);
         hideLoadingBanner();
-        await calculateResultsLocally(room);
     }
-}
-
-// ══════════════════════════════════════════════════════
-//  WIKIPEDIA FACT-CHECKER (2-Query Strategy)
-//  Mirrors GenLayer contract's judge_claims() logic
-// ══════════════════════════════════════════════════════
-async function wikiSearch(query) {
-    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&utf8=1&srlimit=5`;
-    const res = await fetch(url);
-    const data = await res.json();
-    return data?.query?.search || [];
-}
-
-async function wikiExtract(pageId) {
-    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&pageids=${pageId}&format=json&origin=*`;
-    const res = await fetch(url);
-    const data = await res.json();
-    return (data?.query?.pages?.[pageId]?.extract || "").toLowerCase();
-}
-
-async function factCheckWithWikipedia(claimText) {
-    try {
-        const claim = claimText.toLowerCase().trim();
-        addLog(`🔎 Searching Wikipedia for: "${claimText.slice(0,50)}"`);
-
-        // ── Detect superlative/comparison claims ──
-        const superlatives = [
-            "biggest","largest","smallest","tallest","shortest","fastest","slowest",
-            "richest","poorest","oldest","newest","highest","lowest","longest",
-            "most populous","most populated","most powerful","most expensive",
-            "least populous","deepest","widest","heaviest","lightest","greatest"
-        ];
-
-        let foundSup = null;
-        for (const s of superlatives) {
-            if (claim.includes(s)) { foundSup = s; break; }
-        }
-
-        if (foundSup) {
-            // ── SUPERLATIVE CLAIM: "morocco biggest country in the world" ──
-            const supIdx = claim.indexOf(foundSup);
-            const subject   = claim.substring(0, supIdx).trim();       // "morocco"
-            const predicate = claim.substring(supIdx).trim();           // "biggest country in the world"
-
-            addLog(`🔍 Subject: "${subject}" — Checking: "${predicate}"`);
-
-            // Query 1: Search for the PREDICATE to find the REAL answer
-            const realHits = await wikiSearch(predicate);
-            if (realHits.length > 0) {
-                const realTitle   = realHits[0].title.toLowerCase();
-                const realSnippet = realHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
-
-                addLog(`📖 Wikipedia top result: "${realHits[0].title}"`);
-
-                // If subject IS in the Wikipedia answer title → TRUE
-                if (subject && realTitle.includes(subject)) {
-                    return { verdict: true, evidence: `Wikipedia confirms: "${realHits[0].title}"` };
-                }
-
-                // If subject is NOT the answer → FALSE
-                if (subject && !realTitle.includes(subject) && !realSnippet.includes(subject + " is the " + foundSup)) {
-                    return { verdict: false, evidence: `Wikipedia says: "${realHits[0].title}" — not ${subject}` };
-                }
-            }
-
-            // Query 2: Also search the subject directly
-            if (subject) {
-                const subHits = await wikiSearch(subject + " " + predicate);
-                if (subHits.length > 0) {
-                    const subSnippet = subHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
-                    if (subSnippet.includes(subject) && subSnippet.includes(foundSup)) {
-                        return { verdict: true, evidence: subSnippet.slice(0, 200) };
-                    }
-                }
-            }
-
-            return { verdict: false, evidence: `Could not confirm "${subject}" is the ${foundSup}` };
-        }
-
-        // ── GENERAL CLAIM: search the whole claim ──
-        const hits = await wikiSearch(claimText);
-        if (!hits.length) return { verdict: false, evidence: "No Wikipedia evidence found." };
-
-        // Get article extract
-        const extract = await wikiExtract(hits[0].pageid);
-        const allSnippets = hits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
-        const combined = extract + " " + allSnippets;
-
-        // ── NUMBER-AWARE CHECK ──
-        // "messi has 10 ballon d'or" → extract 10, search topic, compare
-        const claimNumbers = claim.match(/\d+/g);
-        if (claimNumbers && claimNumbers.length > 0) {
-            const claimedNum = parseInt(claimNumbers[0]);
-            // Remove number from claim to get the topic
-            const topicQuery = claimText.replace(/\d+/g, "").replace(/\s+/g, " ").trim();
-
-            addLog(`🔢 Number claim detected: ${claimedNum} — topic: "${topicQuery.slice(0,40)}"`);
-
-            // Search topic separately
-            const topicHits = await wikiSearch(topicQuery);
-            if (topicHits.length > 0) {
-                const topicExtract = await wikiExtract(topicHits[0].pageid);
-                const topicSnippets = topicHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
-                const topicText = topicExtract + " " + topicSnippets;
-
-                // Word-to-number map
-                const wordNums = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,
-                    "eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,
-                    "fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,
-                    "nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50};
-
-                // Find all numbers in Wikipedia text
-                const wikiNums = new Set();
-                const digitMatches = topicText.match(/\d+/g) || [];
-                digitMatches.forEach(n => wikiNums.add(parseInt(n)));
-                // Also check written-out numbers
-                for (const [word, num] of Object.entries(wordNums)) {
-                    if (topicText.includes(word)) wikiNums.add(num);
-                }
-
-                // Get keywords from claim (excluding numbers and stop words)
-                const stopW = new Set(["the","a","an","is","are","was","were","in","on","at","to","for","of","and","or","but","not","with","has","have","had"]);
-                const keywords = topicQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopW.has(w));
-
-                // Find numbers that appear NEAR the keywords in the text
-                // Split text into sentences
-                const sentences = topicText.split(/[.!?]+/);
-                let relevantNums = new Set();
-                for (const sent of sentences) {
-                    const hasKeyword = keywords.some(k => sent.includes(k));
-                    if (hasKeyword) {
-                        const sentNums = sent.match(/\d+/g) || [];
-                        sentNums.forEach(n => relevantNums.add(parseInt(n)));
-                        for (const [word, num] of Object.entries(wordNums)) {
-                            if (sent.includes(word)) relevantNums.add(num);
-                        }
-                    }
-                }
-
-                addLog(`📊 Claimed: ${claimedNum} | Wikipedia numbers near topic: [${[...relevantNums].join(",")}]`);
-
-                if (relevantNums.size > 0) {
-                    if (relevantNums.has(claimedNum)) {
-                        return { verdict: true, evidence: `Wikipedia confirms the number ${claimedNum}` };
-                    } else {
-                        const closest = [...relevantNums].sort((a,b) => Math.abs(a-claimedNum) - Math.abs(b-claimedNum));
-                        return { verdict: false, evidence: `Wikipedia says ${closest[0]}, not ${claimedNum}` };
-                    }
-                }
-            }
-        }
-
-        // ── KEYWORD OVERLAP (fallback for non-numeric claims) ──
-        const stopWords = new Set(["the","a","an","is","are","was","were","in","on","at","to","for","of","and","or","but","not","with","this","that","it","as","by","from","has","have","had","be","been"]);
-        const words = claim.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-        const matched = words.filter(w => combined.includes(w)).length;
-        const ratio = words.length > 0 ? matched / words.length : 0;
-
-        // Check for negation/contradiction signals
-        const negations = ["not true","false claim","myth","incorrect","disproven","debunked","misconception","hoax","conspiracy"];
-        const hasNegation = negations.some(n => combined.includes(n));
-
-        if (hasNegation) {
-            return { verdict: false, evidence: allSnippets.slice(0, 200) };
-        }
-
-        return {
-            verdict: ratio >= 0.5 ? true : false,
-            evidence: allSnippets.slice(0, 200)
-        };
-    } catch (e) {
-        console.warn("Wikipedia fact-check error:", e);
-        return { verdict: false, evidence: "Fact-check error: " + e.message };
-    }
-}
-
-// ══════════════════════════════════════════════════════
-//  AI JUDGE: Wikipedia-powered (fallback when GenLayer unavailable)
-// ══════════════════════════════════════════════════════
-async function calculateResultsLocally(room) {
-    const claims  = room.claims  || {};
-    const votes   = room.votes   || {};
-    const results = {};
-    let checkedCount = 0;
-
-    addLog("🔍 Wikipedia AI Judge is fact-checking each claim...");
-    showLoadingBanner("🔍 Fact-checking with Wikipedia...");
-
-    for (const [addr, claim] of Object.entries(claims)) {
-        addLog(`Checking: "${claim.text.slice(0,40)}..."`);
-
-        // ── Real fact-check ──
-        const { verdict: aiSaysTrue, evidence } = await factCheckWithWikipedia(claim.text);
-        checkedCount++;
-
-        // ── Vote tally ──
-        let lieVotes = 0, totalVoters = 0;
-        for (const [voter, vv] of Object.entries(votes)) {
-            if (voter !== addr && vv[addr]) {
-                totalVoters++;
-                if (vv[addr] === "LIE") lieVotes++;
-            }
-        }
-        const wasCaught = totalVoters > 0 && lieVotes > totalVoters / 2;
-
-        // ── Scoring (mirrors contract.py judge_claims logic exactly) ──
-        let points = 0;
-        const playerSaidLie  = claim.isLie;
-        const claimIsActuallyTrue = aiSaysTrue !== false; // null = benefit of doubt → true
-
-        if (playerSaidLie && !wasCaught) {
-            points = 3;   // Lied successfully!
-        } else if (playerSaidLie && wasCaught) {
-            points = -1;  // Lied but got caught
-        } else if (!playerSaidLie && !claimIsActuallyTrue) {
-            points = -1;  // Said "truth" but AI says it's false
-        } else if (!playerSaidLie && claimIsActuallyTrue) {
-            points = 1;   // Told the truth, confirmed
-        }
-
-        // ── Voter bonuses (based on FACTUAL truth, not declaration) ──
-        for (const [voter, vv] of Object.entries(votes)) {
-            if (voter !== addr && vv[addr]) {
-                // Reward voters who correctly identified the FACTUAL truth:
-                // Voted LIE on a FALSE claim = smart detective (+1)
-                // Voted TRUTH on a TRUE claim = correct trust (+1)
-                const voterCorrect = (vv[addr] === "LIE" && !claimIsActuallyTrue) ||
-                                     (vv[addr] === "TRUTH" && claimIsActuallyTrue);
-                if (!results[voter]) results[voter] = { points: 0 };
-                if (voterCorrect) results[voter].points += 1;
-            }
-        }
-
-        results[addr] = {
-            ...(results[addr] || {}),
-            text:       claim.text,
-            was_lie:    playerSaidLie,
-            was_caught: wasCaught,
-            lie_votes:  lieVotes,
-            verdict:    aiSaysTrue,   // actual AI fact-check result
-            ai_evidence: evidence,
-            points:     (results[addr]?.points || 0) + points,
-            username:   claim.username,
-        };
-    }
-
-    hideLoadingBanner();
-
-    let winner = ""; let best = -999;
-    for (const [a, r] of Object.entries(results)) {
-        if (r.points > best) { best = r.points; winner = a; }
-    }
-
-    await db.ref("rooms/" + state.currentRoomId).update({
-        phase: "RESULTS", results, winner
-    });
 }
 
 // ══════════════════════════════════════════════════════
