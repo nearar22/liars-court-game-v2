@@ -366,6 +366,11 @@ function listenToRoom(code) {
             if (room.phase === "VOTING" && room.claims) {
                 buildVotingUI(room.claims);
             }
+            // HOST triggers AI judge when phase moves to JUDGING
+            if (room.phase === "JUDGING" && state.isHost && !state._judging) {
+                state._judging = true;
+                triggerGenLayerJudge(room).finally(() => { state._judging = false; });
+            }
             if (room.phase === "RESULTS" && room.results) {
                 showResults(room.results, room.winner, room.claims);
             }
@@ -411,55 +416,12 @@ function renderPlayers(players, max, host) {
 }
 
 // ══════════════════════════════════════════════════════
-//  START GAME  — Host creates GenLayer room, others join
+//  START GAME
 // ══════════════════════════════════════════════════════
 async function startGame() {
     if (!state.currentRoomId || !state.isHost) return;
-
-    addLog("Starting game — creating GenLayer room...");
-    showLoadingBanner("Creating game on GenLayer...");
-
-    try {
-        // 1. Host creates the GenLayer room (1 tx)
-        const txHash = await glWrite("create_room", [state.playerName]);
-        addLog(`GenLayer tx: <span class="highlight">${txHash.slice(0,12)}...</span>`);
-
-        // 2. Poll for receipt & get room_id from return val
-        addLog("Waiting for GenLayer confirmation...");
-        let glRoomId = -1;
-        try {
-            const receipt = await pollTxResult(txHash, 90000);
-            // Try to get the room id from GenLayer logs/return value
-            // GenLayer returns room_id as output[0]
-            if (receipt?.output !== undefined) glRoomId = parseInt(receipt.output);
-        } catch (_) {
-            // Fallback: use total_rooms - 1
-            try {
-                const total = await glRead("gen_call", [{
-                    to: CONTRACT_ADDRESS,
-                    data: JSON.stringify({ fn: "total_rooms", args: [] })
-                }, "latest"]);
-                glRoomId = Math.max(0, parseInt(total) - 1);
-            } catch (_2) { glRoomId = 0; }
-        }
-
-        addLog(`GenLayer room ID: <span class="highlight">#${glRoomId}</span>`);
-
-        // 3. Save glRoomId to Firebase + move to CLAIMING
-        await db.ref("rooms/" + state.currentRoomId).update({
-            phase:    "CLAIMING",
-            glRoomId: glRoomId,
-        });
-
-        hideLoadingBanner();
-        addLog("Game started! Submit your claims.");
-    } catch (err) {
-        hideLoadingBanner();
-        addLog(`Error: ${err.message}`);
-        console.error(err);
-        // Fallback: start without GenLayer (Firebase-only mode)
-        await db.ref("rooms/" + state.currentRoomId).update({ phase: "CLAIMING", glRoomId: -1 });
-    }
+    addLog("Game started! Submit your claims.");
+    await db.ref("rooms/" + state.currentRoomId).update({ phase: "CLAIMING" });
 }
 
 // ══════════════════════════════════════════════════════
@@ -673,82 +635,112 @@ async function triggerGenLayerJudge(room) {
 }
 
 // ══════════════════════════════════════════════════════
-//  WIKIPEDIA FACT-CHECKER
-//  Same logic as GenLayer contract's judge_claims()
+//  WIKIPEDIA FACT-CHECKER (2-Query Strategy)
+//  Mirrors GenLayer contract's judge_claims() logic
 // ══════════════════════════════════════════════════════
+async function wikiSearch(query) {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&utf8=1&srlimit=5`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data?.query?.search || [];
+}
+
+async function wikiExtract(pageId) {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&pageids=${pageId}&format=json&origin=*`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return (data?.query?.pages?.[pageId]?.extract || "").toLowerCase();
+}
+
 async function factCheckWithWikipedia(claimText) {
     try {
-        // Step 1: Search Wikipedia for claim
-        const q   = encodeURIComponent(claimText);
-        const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&format=json&origin=*&utf8=1&srlimit=3`;
-        const res  = await fetch(url);
-        const data = await res.json();
-        const hits = data?.query?.search || [];
+        const claim = claimText.toLowerCase().trim();
+        addLog(`🔎 Searching Wikipedia for: "${claimText.slice(0,50)}"`);
 
-        if (!hits.length) return { verdict: null, evidence: "No Wikipedia results found." };
+        // ── Detect superlative/comparison claims ──
+        const superlatives = [
+            "biggest","largest","smallest","tallest","shortest","fastest","slowest",
+            "richest","poorest","oldest","newest","highest","lowest","longest",
+            "most populous","most populated","most powerful","most expensive",
+            "least populous","deepest","widest","heaviest","lightest","greatest"
+        ];
 
-        // Step 2: Get page extract for top result
-        const pageId  = hits[0].pageid;
-        const url2    = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&pageids=${pageId}&format=json&origin=*`;
-        const res2    = await fetch(url2);
-        const data2   = await res2.json();
-        const extract = data2?.query?.pages?.[pageId]?.extract || "";
-        const snippet = extract.slice(0, 800).toLowerCase();
-        const claim   = claimText.toLowerCase();
+        let foundSup = null;
+        for (const s of superlatives) {
+            if (claim.includes(s)) { foundSup = s; break; }
+        }
 
-        // Step 3: Check for contradictions
-        // Extract key numbers/superlatives from the claim
-        const isBiggest  = /biggest|largest|most (populous|populated)|tallest|highest|longest|greatest/i.test(claim);
-        const isSmallest = /smallest|least|shortest|lowest|fewest/i.test(claim);
-        const isFirst    = /first|oldest|earliest/i.test(claim);
-        const isOnly     = /only|unique|sole/i.test(claim);
+        if (foundSup) {
+            // ── SUPERLATIVE CLAIM: "morocco biggest country in the world" ──
+            const supIdx = claim.indexOf(foundSup);
+            const subject   = claim.substring(0, supIdx).trim();       // "morocco"
+            const predicate = claim.substring(supIdx).trim();           // "biggest country in the world"
 
-        // Extract main entity from claim (first proper noun-like word)
-        const mainEntity = claimText.split(/\s+/).slice(0,3).join(" ").toLowerCase();
+            addLog(`🔍 Subject: "${subject}" — Checking: "${predicate}"`);
 
-        let verdict = null;
-        let evidence = hits[0].snippet.replace(/<[^>]+>/g, "");
+            // Query 1: Search for the PREDICATE to find the REAL answer
+            const realHits = await wikiSearch(predicate);
+            if (realHits.length > 0) {
+                const realTitle   = realHits[0].title.toLowerCase();
+                const realSnippet = realHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
 
-        if (isBiggest || isSmallest || isFirst || isOnly) {
-            // For superlative claims: check if the Wikipedia article ABOUT the thing
-            // confirms the superlative, or mentions a DIFFERENT entity as the answer
-            const countries = ["russia","canada","china","usa","united states","brazil",
-                "australia","india","argentina","kazakhstan","algeria","democratic republic",
-                "saudi arabia","mexico","indonesia","sudan","libya","iran","mongolia","peru"];
+                addLog(`📖 Wikipedia top result: "${realHits[0].title}"`);
 
-            // Check if a DIFFERENT country is mentioned as the superlative
-            let contradictionFound = false;
-            for (const c of countries) {
-                if (snippet.includes(c) && !mainEntity.includes(c)) {
-                    // The Wikipedia article about "biggest country" mentions Russia,
-                    // but the claim says Morocco → contradiction!
-                    const biggestPattern = new RegExp(`(${c})[^.]*?(largest|biggest|most populous|tallest|highest|longest|greatest|smallest|shortest|lowest)`, "i");
-                    const altPattern    = new RegExp(`(largest|biggest|most populous|tallest|highest|longest|greatest|smallest|shortest|lowest)[^.]*?(${c})`, "i");
-                    if (biggestPattern.test(snippet) || altPattern.test(snippet)) {
-                        contradictionFound = true;
-                        evidence = `Wikipedia says ${c} holds this record, not what was claimed.`;
-                        break;
+                // If subject IS in the Wikipedia answer title → TRUE
+                if (subject && realTitle.includes(subject)) {
+                    return { verdict: true, evidence: `Wikipedia confirms: "${realHits[0].title}"` };
+                }
+
+                // If subject is NOT the answer → FALSE
+                if (subject && !realTitle.includes(subject) && !realSnippet.includes(subject + " is the " + foundSup)) {
+                    return { verdict: false, evidence: `Wikipedia says: "${realHits[0].title}" — not ${subject}` };
+                }
+            }
+
+            // Query 2: Also search the subject directly
+            if (subject) {
+                const subHits = await wikiSearch(subject + " " + predicate);
+                if (subHits.length > 0) {
+                    const subSnippet = subHits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
+                    if (subSnippet.includes(subject) && subSnippet.includes(foundSup)) {
+                        return { verdict: true, evidence: subSnippet.slice(0, 200) };
                     }
                 }
             }
 
-            if (contradictionFound) {
-                verdict = false; // Claim is FALSE
-            } else if (snippet.includes(mainEntity)) {
-                verdict = true;  // Wikipedia confirms the entity in context
-            } else {
-                verdict = null;  // Cannot determine
-            }
-        } else {
-            // For general claims: if Wikipedia article is about the claimed entity
-            // and doesn't contradict, mark as plausible true
-            verdict = snippet.includes(mainEntity) ? true : null;
+            return { verdict: false, evidence: `Could not confirm "${subject}" is the ${foundSup}` };
         }
 
-        return { verdict, evidence: evidence.slice(0, 200) };
+        // ── GENERAL CLAIM: search the whole claim ──
+        const hits = await wikiSearch(claimText);
+        if (!hits.length) return { verdict: false, evidence: "No Wikipedia evidence found." };
+
+        // Get article extract
+        const extract = await wikiExtract(hits[0].pageid);
+        const allSnippets = hits.map(h => h.snippet.replace(/<[^>]+>/g, "")).join(" ").toLowerCase();
+        const combined = extract + " " + allSnippets;
+
+        // Check keyword overlap
+        const stopWords = new Set(["the","a","an","is","are","was","were","in","on","at","to","for","of","and","or","but","not","with","this","that","it","as","by","from","has","have","had","be","been"]);
+        const words = claim.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+        const matched = words.filter(w => combined.includes(w)).length;
+        const ratio = words.length > 0 ? matched / words.length : 0;
+
+        // Check for negation/contradiction signals
+        const negations = ["not true","false claim","myth","incorrect","disproven","debunked","misconception","hoax","conspiracy"];
+        const hasNegation = negations.some(n => combined.includes(n));
+
+        if (hasNegation) {
+            return { verdict: false, evidence: allSnippets.slice(0, 200) };
+        }
+
+        return {
+            verdict: ratio >= 0.5 ? true : false,
+            evidence: allSnippets.slice(0, 200)
+        };
     } catch (e) {
-        console.warn("Wikipedia check failed:", e);
-        return { verdict: null, evidence: "Fact-check unavailable." };
+        console.warn("Wikipedia fact-check error:", e);
+        return { verdict: false, evidence: "Fact-check error: " + e.message };
     }
 }
 
