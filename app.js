@@ -18,6 +18,7 @@
 
 const RPC_URL          = "https://zksync-os-testnet-genlayer.zksync.dev/";
 const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
+const JUDGE_CONTRACT   = "0x76c27C81d176f23F33B2De407E2E12A57d9F4852";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
 const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com/";
@@ -536,9 +537,9 @@ async function triggerAIJudge(room) {
         addLog(`📡 Querying GenLayer AI on <span class="highlight">Bradbury Testnet</span>...`);
 
         // ══════════════════════════════════════════════
-        //  STEP 1: AI FACT-CHECK via GenLayer RPC
-        //  We use gen_call to have the GenLayer node's
-        //  LLM evaluate each claim factually.
+        //  STEP 1: AI FACT-CHECK via GenLayer SDK
+        //  Uses genlayer-js writeContract (same as snake-protocol)
+        //  Validators run LLM + reach consensus via Equivalence Principle
         // ══════════════════════════════════════════════
         let verdicts = {};
         
@@ -547,43 +548,70 @@ async function triggerAIJudge(room) {
         const claimAddrs = Object.keys(claims);
         for (let i = 0; i < claimAddrs.length; i++) {
             const addr = claimAddrs[i];
-            claimsSummary += `CLAIM_${i+1} (${addr}): "${claims[addr].text}"\n`;
+            claimsSummary += `${addr}: "${claims[addr].text}"\n`;
         }
         
-        // Try GenLayer RPC for AI fact-checking
-        try {
-            const callData = JSON.stringify({
-                method: "judge_claims_batch",
-                args: {
-                    theme: room.theme || "General Knowledge",
-                    claims: claimsSummary
-                }
-            });
-            
-            // Use gen_call for a read-only AI analysis
-            const result = await glRPC("gen_call", [{
-                to: CONTRACT_ADDRESS,
-                data: callData
-            }, "latest"]);
-            
-            if (result) {
-                try {
-                    // Try to parse the result as JSON
-                    let parsed = typeof result === "string" ? JSON.parse(result) : result;
-                    if (typeof parsed === "object" && !Array.isArray(parsed)) {
-                        verdicts = parsed;
+        // PRIMARY: Use GenLayer SDK (genlayer-js bridge)
+        if (window.GenLayerBridge) {
+            try {
+                addLog(`📡 Querying GenLayer AI on <span class="highlight">Bradbury Testnet</span>...`);
+                
+                const glClient = window.GenLayerBridge.createClient({
+                    chain: window.GenLayerBridge.chains.testnetBradbury,
+                    account: state.account,
+                });
+                
+                addLog("⛓️ Sending AI judge transaction to GenLayer validators...");
+                
+                const txHash = await glClient.writeContract({
+                    address: JUDGE_CONTRACT,
+                    functionName: "judge_claims",
+                    args: [room.theme || "General Knowledge", claimsSummary],
+                    value: BigInt(0),
+                });
+                
+                addLog(`📝 TX submitted: ${txHash.substring(0, 10)}...`);
+                addLog("⏳ Waiting for validator consensus (this may take up to 2 min)...");
+                
+                const receipt = await glClient.waitForTransactionReceipt({
+                    hash: txHash,
+                    status: "ACCEPTED",
+                    retries: 60,
+                    interval: 5000,
+                });
+                
+                console.log("[GenLayer] Receipt:", JSON.stringify(receipt, (k, v) => typeof v === "bigint" ? v.toString() : v));
+                
+                // Parse the result from the receipt or read contract state
+                if (receipt && receipt.result) {
+                    let resultStr = typeof receipt.result === "string" ? receipt.result : JSON.stringify(receipt.result);
+                    resultStr = resultStr.replace(/```json/g, "").replace(/```/g, "").trim();
+                    try {
+                        const parsed = JSON.parse(resultStr);
+                        // Map the parsed verdicts to our address format
+                        for (const [key, value] of Object.entries(parsed)) {
+                            // Key might be the full address or a partial match
+                            for (const addr of claimAddrs) {
+                                if (key.includes(addr) || addr.includes(key)) {
+                                    verdicts[addr] = value;
+                                }
+                            }
+                        }
+                    } catch (pe) {
+                        console.error("Failed to parse GenLayer result:", resultStr);
                     }
-                } catch (pe) {
-                    console.log("GenLayer RPC result not JSON, using heuristic:", result);
                 }
+                
+                if (Object.keys(verdicts).length > 0) {
+                    addLog("✅ GenLayer validators reached consensus!");
+                }
+            } catch (glErr) {
+                console.error("GenLayer SDK error:", glErr);
+                addLog("⚠️ GenLayer consensus failed, using backup AI...");
             }
-        } catch (rpcErr) {
-            console.log("GenLayer RPC call result:", rpcErr.message);
-            // RPC might fail if contract doesn't have that method or network issues
-            // Fall through to real AI analysis below
         }
-
-        // If GenLayer RPC didn't return usable verdicts, use external AI API
+        
+        // FALLBACK: Use Pollinations API if GenLayer didn't return verdicts
         if (Object.keys(verdicts).length === 0) {
             addLog("🔄 AI Judge verifying facts via external LLM...");
             verdicts = await pollinationsFactCheck(claims, room.theme);
@@ -698,26 +726,42 @@ async function pollinationsFactCheck(claims, theme) {
     for (const [addr, claim] of Object.entries(claims)) {
         const textToAnalyze = claim.text;
         
-        // Strict prompt preventing hallucination
-        const prompt = `You are a strict trivia fact-checker. Determine if the following claim about the theme "${theme}" is factually true or false in the real world.
-Claim: "${textToAnalyze}"
-Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctuation.`;
-
-        // We don't specify the model to use the default robust one
-        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt);
-        
         try {
             console.log("AI checking claim:", textToAnalyze);
-            const res = await fetch(url);
+            
+            // Use the POST JSON API for better accuracy
+            const res = await fetch('https://text.pollinations.ai/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [
+                        {
+                            role: "system",
+                            content: "You are a strict encyclopedic fact-checker. You verify claims against real-world knowledge. You must respond with EXACTLY one word: TRUE or FALSE. Nothing else."
+                        },
+                        {
+                            role: "user",
+                            content: `Theme: ${theme}\nClaim: "${textToAnalyze}"\n\nIs this claim factually correct? Respond with exactly TRUE or FALSE.`
+                        }
+                    ],
+                    jsonMode: false
+                })
+            });
             
             if (!res.ok) {
-                console.error("AI API returned status:", res.status);
-                verdicts[addr] = true; // Fallback to safe truth on network error
+                // Fallback to GET if POST fails
+                const getUrl = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(
+                    `You are a strict fact-checker. Is this claim about "${theme}" factually true or false? Claim: "${textToAnalyze}". Respond EXACTLY with TRUE or FALSE only.`
+                );
+                const getRes = await fetch(getUrl);
+                const getText = await getRes.text();
+                const getAnswer = getText.toUpperCase().trim();
+                verdicts[addr] = getAnswer.includes("TRUE") && !getAnswer.includes("FALSE");
                 continue;
             }
             
             const responseText = await res.text();
-            console.log("AI Response:", responseText);
+            console.log("AI Response for", addr, ":", responseText);
             
             const answer = responseText.toUpperCase().trim();
             if (answer.includes("FALSE")) {
@@ -725,15 +769,15 @@ Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctu
             } else if (answer.includes("TRUE")) {
                 verdicts[addr] = true;
             } else {
-                verdicts[addr] = false; // Safest default for weird AI outputs
+                verdicts[addr] = false;
             }
             
-            // Wait a small bit to avoid rate limits on the free API
-            await new Promise(r => setTimeout(r, 600));
+            // Small delay to avoid rate limits
+            await new Promise(r => setTimeout(r, 500));
             
         } catch (err) {
-            console.error("Pollinations AI network error:", err);
-            verdicts[addr] = false; // Default fallback
+            console.error("Pollinations AI error:", err);
+            verdicts[addr] = true; // Safe fallback
         }
     }
     

@@ -270,6 +270,37 @@ Return ONLY the JSON object."""
         self.rooms[room_id] = json.dumps(room)
 
     # ═══════════════════════════════════════
+    #  BATCH AI JUDGE (called from frontend)
+    # ═══════════════════════════════════════
+
+    @gl.public.write
+    def judge_claims_batch(self, theme: str, claims_json: str) -> str:
+        """
+        AI fact-checks claims via GenLayer LLM consensus.
+        Uses gl.nondet.exec_prompt + gl.eq_principle.strict_eq
+        (same proven pattern as snake-protocol).
+        Returns JSON: {"0xAddr1": true, "0xAddr2": false}
+        """
+        def ask_llm() -> str:
+            prompt = f"""You are a strict trivia fact-checker for a game called "Liar's Court".
+THEME: {theme}
+
+CLAIMS TO CHECK:
+{claims_json}
+
+For each claim, determine if it is factually TRUE or FALSE in the real world.
+Respond ONLY with a JSON object where keys are the player identifiers and values are booleans.
+Example: {{"CLAIM_1 (0xAddr1)": true, "CLAIM_2 (0xAddr2)": false}}
+No markdown, no explanation, ONLY valid JSON."""
+            raw = gl.nondet.exec_prompt(prompt)
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(raw)
+            return json.dumps(parsed, sort_keys=True)
+
+        result_str = gl.eq_principle.strict_eq(ask_llm)
+        return result_str
+
+    # ═══════════════════════════════════════
     #  READ METHODS
     # ═══════════════════════════════════════
 
