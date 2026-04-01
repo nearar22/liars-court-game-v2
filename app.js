@@ -297,6 +297,21 @@ function listenToRoom(code) {
         if (room.phase !== prevPhase) {
             state.currentPhase = room.phase;
             $("#resultsOverlay").classList.remove("visible"); // always close modal on phase switch
+            
+            if (room.phase === "LOBBY") {
+                // Reset purely local tracking and UI forms for ALL players (hosts and guests)
+                state.myClaim  = null;
+                state.myVotes  = {};
+                state._judging = false;
+                
+                $("#claimInput").value = "";
+                $("#isLieToggle").checked = false;
+                $("#submitClaimBtn").textContent = "SUBMIT TO COURT";
+                $("#submitClaimBtn").disabled = false;
+                $("#submitVotesBtn").textContent = "SUBMIT VERDICT";
+                $("#submitVotesBtn").disabled = false;
+            }
+
             showPhase(room.phase);
 
             if (room.phase === "VOTING" && room.claims) {
