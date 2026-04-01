@@ -800,15 +800,15 @@ function showResults(results, winner, claims) {
 
         // AI verdict badge
         let aiBadge = "";
-        if (res.verdict === true)  aiBadge = `<div style="font-size:0.65rem;color:#4ade80;margin-top:3px;">🤖 AI: Factually TRUE</div>`;
-        if (res.verdict === false) aiBadge = `<div style="font-size:0.65rem;color:#f97316;margin-top:3px;">🤖 AI: Factually FALSE</div>`;
+        if (res.verdict === true)  aiBadge = `<div style="font-size:0.65rem;color:#4ade80;margin-top:3px;font-weight:700;">🤖 AI FACT-CHECK: TRUE ✅</div>`;
+        if (res.verdict === false) aiBadge = `<div style="font-size:0.65rem;color:#f97316;margin-top:3px;font-weight:700;">🤖 AI FACT-CHECK: FALSE 🚨</div>`;
 
         // Points explanation
         let why = "";
-        if (res.was_lie && !res.was_caught)        why = "Successful liar!";
-        else if (res.was_lie && res.was_caught)     why = "Caught lying!";
-        else if (!res.was_lie && res.verdict===false) why = "Told a wrong truth!";
-        else if (!res.was_lie && res.verdict===true)  why = "Truth confirmed!";
+        if (res.was_lie && !res.was_caught)           why = "Got away with the lie! 😎";
+        else if (res.was_lie && res.was_caught)       why = "Players caught your lie 👮";
+        else if (!res.was_lie && res.verdict===false) why = "AI caught a fake fact 🤖";
+        else if (!res.was_lie && res.verdict===true)  why = "Truth verified! 🌟";
         else                                          why = "Truth teller";
 
         // Verdict badge
