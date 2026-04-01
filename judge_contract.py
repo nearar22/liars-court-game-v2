@@ -9,15 +9,18 @@ class LiarsCourtJudge(gl.Contract):
     Uses gl.nondet.exec_prompt + gl.eq_principle.strict_eq
     (same proven pattern as snake-protocol).
     """
+    
+    # Store the latest verdicts (transaction hash or room id could be used as key, but here we just store latest for simplicity since each room calls it)
+    last_verdicts: TreeMap[str, str]
 
     def __init__(self):
-        pass
+        self.last_verdicts = TreeMap()
 
     @gl.public.write
-    def judge_claims(self, theme: str, claims_text: str) -> str:
+    def judge_claims(self, room_id: str, theme: str, claims_text: str) -> None:
         """
         AI fact-checks claims via GenLayer LLM consensus.
-        Returns JSON string: {"addr1": true, "addr2": false}
+        Saves JSON string to state.
         """
         def ask_llm() -> str:
             prompt = f"""You are a strict fact-checker for a trivia game.
@@ -35,4 +38,10 @@ No markdown, no explanation, ONLY valid JSON."""
             return json.dumps(parsed, sort_keys=True)
 
         result_str = gl.eq_principle.strict_eq(ask_llm)
-        return result_str
+        self.last_verdicts[room_id] = result_str
+
+    @gl.public.view
+    def get_verdicts(self, room_id: str) -> str:
+        if room_id in self.last_verdicts:
+            return self.last_verdicts[room_id]
+        return "{}"

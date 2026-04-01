@@ -18,7 +18,7 @@
 
 const RPC_URL          = "https://zksync-os-testnet-genlayer.zksync.dev/";
 const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
-const JUDGE_CONTRACT   = "0x76c27C81d176f23F33B2De407E2E12A57d9F4852";
+const JUDGE_CONTRACT   = "0xCcE30c08140e9034a09fe91f8c032aF67706c0cF";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
 const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com/";
@@ -566,7 +566,7 @@ async function triggerAIJudge(room) {
                 const txHash = await glClient.writeContract({
                     address: JUDGE_CONTRACT,
                     functionName: "judge_claims",
-                    args: [room.theme || "General Knowledge", claimsSummary],
+                    args: [room.id.toString(), room.theme || "General Knowledge", claimsSummary],
                     value: BigInt(0),
                 });
                 
@@ -580,25 +580,33 @@ async function triggerAIJudge(room) {
                     interval: 5000,
                 });
                 
-                console.log("[GenLayer] Receipt:", JSON.stringify(receipt, (k, v) => typeof v === "bigint" ? v.toString() : v));
+                console.log("[GenLayer] Receipt status:", receipt.status);
                 
-                // Parse the result from the receipt or read contract state
-                if (receipt && receipt.result) {
-                    let resultStr = typeof receipt.result === "string" ? receipt.result : JSON.stringify(receipt.result);
-                    resultStr = resultStr.replace(/```json/g, "").replace(/```/g, "").trim();
-                    try {
-                        const parsed = JSON.parse(resultStr);
-                        // Map the parsed verdicts to our address format
-                        for (const [key, value] of Object.entries(parsed)) {
-                            // Key might be the full address or a partial match
-                            for (const addr of claimAddrs) {
-                                if (key.includes(addr) || addr.includes(key)) {
-                                    verdicts[addr] = value;
+                if (receipt) {
+                    // Transaction completed successfully. Now read the stored result from state!
+                    const resultStr = await glClient.readContract({
+                        address: JUDGE_CONTRACT,
+                        functionName: "get_verdicts",
+                        args: [room.id.toString()]
+                    });
+                    
+                    if (resultStr && resultStr !== "{}") {
+                        try {
+                            const parsed = JSON.parse(resultStr);
+                            // Map the parsed verdicts to our address format
+                            for (const [key, value] of Object.entries(parsed)) {
+                                // Key might be the full address or a partial match
+                                for (const addr of claimAddrs) {
+                                    if (key.includes(addr) || addr.includes(key)) {
+                                        verdicts[addr] = value;
+                                    }
                                 }
                             }
+                        } catch (pe) {
+                            console.error("Failed to parse GenLayer result:", resultStr);
                         }
-                    } catch (pe) {
-                        console.error("Failed to parse GenLayer result:", resultStr);
+                    } else {
+                        throw new Error("get_verdicts returned empty JSON");
                     }
                 }
                 
@@ -726,37 +734,21 @@ async function pollinationsFactCheck(claims, theme) {
     for (const [addr, claim] of Object.entries(claims)) {
         const textToAnalyze = claim.text;
         
+        // Strict prompt preventing hallucination
+        const prompt = `You are a strict trivia fact-checker. Determine if the following claim about the theme "${theme}" is factually true or false in the real world.
+Claim: "${textToAnalyze}"
+Respond EXACTLY with the word "TRUE" or "FALSE". No other explanation, no punctuation.`;
+
+        // We don't specify the model to use the default robust one
+        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt);
+        
         try {
             console.log("AI checking claim:", textToAnalyze);
-            
-            // Use the POST JSON API for better accuracy
-            const res = await fetch('https://text.pollinations.ai/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: [
-                        {
-                            role: "system",
-                            content: "You are a strict encyclopedic fact-checker. You verify claims against real-world knowledge. You must respond with EXACTLY one word: TRUE or FALSE. Nothing else."
-                        },
-                        {
-                            role: "user",
-                            content: `Theme: ${theme}\nClaim: "${textToAnalyze}"\n\nIs this claim factually correct? Respond with exactly TRUE or FALSE.`
-                        }
-                    ],
-                    jsonMode: false
-                })
-            });
+            const res = await fetch(url);
             
             if (!res.ok) {
-                // Fallback to GET if POST fails
-                const getUrl = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(
-                    `You are a strict fact-checker. Is this claim about "${theme}" factually true or false? Claim: "${textToAnalyze}". Respond EXACTLY with TRUE or FALSE only.`
-                );
-                const getRes = await fetch(getUrl);
-                const getText = await getRes.text();
-                const getAnswer = getText.toUpperCase().trim();
-                verdicts[addr] = getAnswer.includes("TRUE") && !getAnswer.includes("FALSE");
+                console.error("AI API returned status:", res.status);
+                verdicts[addr] = false; // Safest default for weird AI outputs
                 continue;
             }
             
@@ -769,15 +761,16 @@ async function pollinationsFactCheck(claims, theme) {
             } else if (answer.includes("TRUE")) {
                 verdicts[addr] = true;
             } else {
-                verdicts[addr] = false;
+                verdicts[addr] = false; // Safest default for weird AI outputs
             }
             
-            // Small delay to avoid rate limits
-            await new Promise(r => setTimeout(r, 500));
+            // Wait a small bit to avoid rate limits on the free API
+            await new Promise(r => setTimeout(r, 600));
             
         } catch (err) {
-            console.error("Pollinations AI error:", err);
-            verdicts[addr] = true; // Safe fallback
+            console.error("Pollinations AI network error:", err);
+            // Defaulting to FALSE so we don't accidentally reward lying if API is down
+            verdicts[addr] = false; 
         }
     }
     
