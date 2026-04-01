@@ -296,6 +296,7 @@ function listenToRoom(code) {
         const prevPhase = state.currentPhase;
         if (room.phase !== prevPhase) {
             state.currentPhase = room.phase;
+            $("#resultsOverlay").classList.remove("visible"); // always close modal on phase switch
             showPhase(room.phase);
 
             if (room.phase === "VOTING" && room.claims) {
@@ -847,6 +848,20 @@ function showResults(results, winner, claims) {
         </tr>`;
     }
     $("#resultsBody").innerHTML = html;
+    
+    // Update play again button based on role
+    const paBtn = $("#playAgainBtn");
+    if (paBtn) {
+        if (state.isHost) {
+            paBtn.disabled = false;
+            paBtn.textContent = "PLAY AGAIN / RESTART";
+            paBtn.style.opacity = "1";
+        } else {
+            paBtn.disabled = true;
+            paBtn.textContent = "WAITING FOR HOST TO RESTART...";
+            paBtn.style.opacity = "0.6";
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -920,20 +935,44 @@ function setupEventListeners() {
     };
 
     const playAgain = $("#playAgainBtn");
-    if (playAgain) playAgain.onclick = () => {
-        $("#resultsOverlay").classList.remove("visible");
-        // Reset ALL state for clean new game
-        if (_roomListener) { db.ref("rooms/" + _roomListener).off(); _roomListener = null; }
-        state.currentRoomId = null;
-        state.currentPhase  = "LOBBY";
-        state.roomData      = null;
-        state.myClaim       = null;
-        state.myVotes       = {};
-        state.isHost        = false;
-        state._judging      = false;
+    if (playAgain) playAgain.onclick = async () => {
+        if (!state.isHost) {
+            alert("Only the Host can restart the court!");
+            return;
+        }
+
+        $("#playAgainBtn").disabled = true;
+        $("#playAgainBtn").textContent = "RESTARTING...";
+
+        if (state.currentRoomId) {
+            // Host resets the room for everyone
+            await db.ref("rooms/" + state.currentRoomId).update({
+                phase: "LOBBY",
+                claims: null,
+                votes: null,
+                verdicts: null,
+                results: null,
+                winner: null
+            });
+            addLog("🔄 Host restarted the game!");
+        }
+        
+        // Reset purely local tracking flags
+        state.myClaim  = null;
+        state.myVotes  = {};
+        state._judging = false;
+        
+        // Reset UI form states
+        $("#claimInput").value = "";
+        $("#isLieToggle").checked = false;
+        $("#submitClaimBtn").textContent = "SUBMIT TO AI JUDGE";
+        $("#submitClaimBtn").disabled = false;
+        $("#submitVotesBtn").textContent = "SUBMIT VERDICT";
+        $("#submitVotesBtn").disabled = false;
+        
+        $("#playAgainBtn").disabled = false;
+        $("#playAgainBtn").textContent = "PLAY AGAIN";
         hideLoadingBanner();
-        showPhase("LOBBY");
-        loadRoomList();
     };
 
     $$("#themeOptions .theme-option").forEach(opt => {
