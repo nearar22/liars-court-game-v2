@@ -18,7 +18,7 @@
 
 const RPC_URL          = "https://zksync-os-testnet-genlayer.zksync.dev/";
 const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
-const JUDGE_CONTRACT   = "0xCcE30c08140e9034a09fe91f8c032aF67706c0cF";
+const JUDGE_CONTRACT   = "0x17Df004852d86a309a0627A3b98E6191bb66268A";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
 const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com/";
@@ -566,7 +566,7 @@ async function triggerAIJudge(room) {
                 const txHash = await glClient.writeContract({
                     address: JUDGE_CONTRACT,
                     functionName: "judge_claims",
-                    args: [room.id.toString(), room.theme || "General Knowledge", claimsSummary],
+                    args: [state.currentRoomId, room.theme || "General Knowledge", claimsSummary],
                     value: BigInt(0),
                 });
                 
@@ -587,7 +587,7 @@ async function triggerAIJudge(room) {
                     const resultStr = await glClient.readContract({
                         address: JUDGE_CONTRACT,
                         functionName: "get_verdicts",
-                        args: [room.id.toString()]
+                        args: [state.currentRoomId]
                     });
                     
                     if (resultStr && resultStr !== "{}") {
