@@ -133,6 +133,12 @@ async function connectWallet() {
             $("#connectWalletBtn").textContent = `⚡ ${state.playerName}`;
         }
     });
+
+    // Auto-reconnect to room if page was reloaded
+    const savedCode = sessionStorage.getItem("activeRoom");
+    if (savedCode) {
+        joinRoom(savedCode).catch(e => console.log("Auto-reconnect failed:", e));
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -215,6 +221,7 @@ async function createRoom() {
     await db.ref("rooms/" + code).set(roomData);
     state.currentRoomId = code;
     state.isHost = true;
+    sessionStorage.setItem("activeRoom", code);
     listenToRoom(code);
     addLog(`Court <span class="highlight">${name}</span> created! Code: <strong>${code}</strong>`);
 }
@@ -241,6 +248,7 @@ async function joinRoom(code) {
 
     state.currentRoomId = code;
     state.isHost = room.host?.toLowerCase() === state.playerAddr.toLowerCase();
+    sessionStorage.setItem("activeRoom", code);
     listenToRoom(code);
     addLog(`Joined <span class="highlight">${room.name}</span>!`);
 }
@@ -988,6 +996,32 @@ function setupEventListeners() {
         $("#playAgainBtn").disabled = false;
         $("#playAgainBtn").textContent = "PLAY AGAIN";
         hideLoadingBanner();
+    };
+    
+    const leaveRoomBtn = $("#leaveRoomBtn");
+    if (leaveRoomBtn) leaveRoomBtn.onclick = async () => {
+        if (!confirm("Are you sure you want to leave the court?")) return;
+        
+        if (state.currentRoomId) {
+            if (state.isHost) {
+                await db.ref("rooms/" + state.currentRoomId).remove();
+                addLog("🔴 Court closed!");
+            } else {
+                await db.ref(`rooms/${state.currentRoomId}/players/${state.playerAddr}`).remove();
+                addLog("🚪 You left the court.");
+            }
+        }
+        
+        sessionStorage.removeItem("activeRoom");
+        if (_roomListener) { db.ref("rooms/" + _roomListener).off(); _roomListener = null; }
+        state.currentRoomId = null;
+        state.currentPhase = "LOBBY";
+        state.roomData = null;
+        state.isHost = false;
+        
+        $("#roomInterface").style.display = "none";
+        $("#listInterface").style.display = "block";
+        loadRoomList();
     };
 
     $$("#themeOptions .theme-option").forEach(opt => {

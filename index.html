@@ -95,7 +95,10 @@
                             <button class="copy-btn" id="copyCodeBtn">📋 Copy</button>
                         </div>
                     </div>
-                    <button class="start-game-btn" id="startGameBtn" disabled>START GAME</button>
+                    <div style="display:flex;gap:0.8rem;align-items:center;">
+                        <button class="leave-btn" id="leaveRoomBtn" style="background:transparent;border:1px solid var(--crimson);color:var(--crimson);border-radius:6px;cursor:pointer;padding:0.6rem 1rem;font-size:0.9rem;font-weight:700;">LEAVE</button>
+                        <button class="start-game-btn" id="startGameBtn" disabled>START GAME</button>
+                    </div>
                 </div>
                 <div class="players-grid" id="playersGrid">
                     <!-- Player slots injected via JS -->
