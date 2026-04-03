@@ -18,7 +18,7 @@
 
 const RPC_URL          = "https://zksync-os-testnet-genlayer.zksync.dev/";
 const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
-const JUDGE_CONTRACT   = "0x17Df004852d86a309a0627A3b98E6191bb66268A";
+const JUDGE_CONTRACT   = "0xA495B812489276D9D281CFF0A3226eDAF7Dc62A4";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
 const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com/";
@@ -41,6 +41,7 @@ let state = {
 // ── HELPERS ────────────────────────────────────────────
 const $ = sel => document.querySelector(sel);
 const $$ = sel => document.querySelectorAll(sel);
+function refreshIcons() { if (window.lucide) lucide.createIcons(); }
 function shortAddr(a) { return a ? a.slice(0,6)+"..."+a.slice(38) : "???"; }
 
 function addLog(msg) {
@@ -51,6 +52,139 @@ function addLog(msg) {
     log.innerHTML = `<div class="log-entry"><span class="log-time">${hh}:${mm}</span><span class="log-msg">${msg}</span></div>` + log.innerHTML;
     if (log.children.length > 25) log.lastChild.remove();
 }
+
+// ── TOAST NOTIFICATIONS ────────────────────────────────
+function showToast(msg, type = "info") {
+    const container = $("#toastContainer");
+    if (!container) return;
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3200);
+}
+
+// ── CONFETTI ───────────────────────────────────────────
+function launchConfetti() {
+    const canvas = document.getElementById("confettiCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const pieces = [];
+    const colors = ["#ffd700","#34d399","#f43f5e","#a78bfa","#22d3ee","#ff8c00"];
+    for (let i = 0; i < 150; i++) {
+        pieces.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height - canvas.height,
+            w: Math.random() * 8 + 4,
+            h: Math.random() * 6 + 2,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            vx: (Math.random() - 0.5) * 4,
+            vy: Math.random() * 3 + 2,
+            rot: Math.random() * 360,
+            rotSpeed: (Math.random() - 0.5) * 10,
+        });
+    }
+    let frame = 0;
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        for (const p of pieces) {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.05;
+            p.rot += p.rotSpeed;
+            if (p.y < canvas.height + 20) alive = true;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rot * Math.PI) / 180);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = Math.max(0, 1 - frame / 180);
+            ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+            ctx.restore();
+        }
+        frame++;
+        if (alive && frame < 200) requestAnimationFrame(draw);
+        else ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    draw();
+}
+
+// ── SOUND EFFECTS (Web Audio API — no files needed) ────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let _audioCtx = null;
+function getAudioCtx() { if (!_audioCtx) _audioCtx = new AudioCtx(); return _audioCtx; }
+
+function playSound(type) {
+    try {
+        const ctx = getAudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        gain.gain.value = 0.15;
+
+        if (type === "submit") {
+            osc.frequency.setValueAtTime(523, ctx.currentTime);
+            osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+            osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+            osc.start(); osc.stop(ctx.currentTime + 0.4);
+        } else if (type === "vote") {
+            osc.frequency.setValueAtTime(440, ctx.currentTime);
+            osc.frequency.setValueAtTime(550, ctx.currentTime + 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+            osc.start(); osc.stop(ctx.currentTime + 0.2);
+        } else if (type === "win") {
+            osc.frequency.setValueAtTime(523, ctx.currentTime);
+            osc.frequency.setValueAtTime(659, ctx.currentTime + 0.15);
+            osc.frequency.setValueAtTime(784, ctx.currentTime + 0.3);
+            osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.45);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+            osc.start(); osc.stop(ctx.currentTime + 0.7);
+        } else if (type === "error") {
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(200, ctx.currentTime);
+            osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            osc.start(); osc.stop(ctx.currentTime + 0.3);
+        } else if (type === "tick") {
+            osc.frequency.setValueAtTime(800, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+            osc.start(); osc.stop(ctx.currentTime + 0.05);
+        }
+    } catch(e) {}
+}
+
+// ── COUNTDOWN TIMER ────────────────────────────────────
+let countdownInterval = null;
+function startCountdown(seconds, onComplete, containerId) {
+    clearInterval(countdownInterval);
+    const container = containerId ? document.getElementById(containerId) : null;
+    const barEl = container ? container.querySelector(".countdown-fill") : document.querySelector(".countdown-fill");
+    const textEl = container ? container.nextElementSibling : document.querySelector(".countdown-text");
+    if (!barEl) return;
+    let remaining = seconds;
+    barEl.style.width = "100%";
+    if (textEl) { textEl.textContent = `${remaining}s remaining`; textEl.classList.remove("urgent"); }
+    countdownInterval = setInterval(() => {
+        remaining--;
+        const pct = (remaining / seconds) * 100;
+        barEl.style.width = pct + "%";
+        if (textEl) {
+            textEl.textContent = `${remaining}s remaining`;
+            if (remaining <= 10) textEl.classList.add("urgent");
+        }
+        if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            if (textEl) textEl.textContent = "Time's up!";
+            playSound("tick");
+            if (onComplete) onComplete();
+        }
+    }, 1000);
+}
+function stopCountdown() { clearInterval(countdownInterval); }
 
 // ══════════════════════════════════════════════════════
 //  FIREBASE SETUP
@@ -321,17 +455,33 @@ function listenToRoom(code) {
             }
 
             showPhase(room.phase);
+            stopCountdown();
 
+            if (room.phase === "CLAIMING") {
+                showToast("Make your claim! You have 60 seconds.", "info");
+                startCountdown(60, () => {
+                    if (!state.myClaim) showToast("Time's up! Submit now!", "warning");
+                }, "claimCountdown");
+            }
             if (room.phase === "VOTING" && room.claims) {
                 buildVotingUI(room.claims);
+                showToast("Vote on each claim! 45 seconds.", "info");
+                startCountdown(45, () => {
+                    showToast("Hurry! Voting ends soon.", "warning");
+                }, "voteCountdown");
             }
             // HOST triggers AI judge when phase moves to JUDGING
             if (room.phase === "JUDGING" && state.isHost && !state._judging) {
                 state._judging = true;
+                showToast("GenLayer AI is analyzing claims...", "info");
                 triggerAIJudge(room).finally(() => { state._judging = false; });
             }
             if (room.phase === "RESULTS" && room.results) {
                 showResults(room.results, room.winner, room.claims);
+                launchConfetti();
+                playSound("win");
+                const wd = room.results[room.winner];
+                showToast(`${wd?.username || "Winner"} wins the round!`, "success");
             }
         }
 
@@ -415,6 +565,9 @@ async function submitClaim() {
         });
         state.myClaim = { text, isLie };
         addLog("✅ Claim submitted!");
+        showToast("Claim submitted!", "success");
+        playSound("submit");
+        stopCountdown();
 
         // Check if all players submitted → move to VOTING
         const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
@@ -441,7 +594,7 @@ async function submitClaim() {
 function buildVotingUI(claims) {
     state.myVotes = {};
     const grid = $("#claimsGrid");
-    let html = `<h3 style="grid-column:1/-1;color:var(--gold);margin-bottom:0.5rem;">
+    let html = `<h3 style="grid-column:1/-1;color:var(--purple);margin-bottom:0.5rem;">
         🕵️ Vote on each claim: Truth or Lie?
     </h3>`;
 
@@ -522,6 +675,9 @@ async function submitVotes() {
         // Save votes to Firebase
         await db.ref(`rooms/${state.currentRoomId}/votes/${state.playerAddr}`).set(state.myVotes);
         addLog("✅ Votes recorded!");
+        showToast("Votes submitted!", "success");
+        playSound("vote");
+        stopCountdown();
 
         // Check if all voted → move to JUDGING
         const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
@@ -567,88 +723,210 @@ async function triggerAIJudge(room) {
         // ══════════════════════════════════════════════
         let verdicts = {};
         
-        // Build the claims summary for AI analysis
-        let claimsSummary = "";
+        // Build the claims JSON for AI analysis
+        // Format: "0xAddr: \"claim text\"\n" per line
         const claimAddrs = Object.keys(claims);
-        for (let i = 0; i < claimAddrs.length; i++) {
-            const addr = claimAddrs[i];
+        let claimsSummary = "";
+        for (const addr of claimAddrs) {
             claimsSummary += `${addr}: "${claims[addr].text}"\n`;
         }
         
-        // PRIMARY: Use GenLayer SDK (genlayer-js bridge)
-        if (window.GenLayerBridge) {
-            try {
-                addLog(`📡 Querying GenLayer AI on <span class="highlight">Bradbury Testnet</span>...`);
-                
-                const glClient = window.GenLayerBridge.createClient({
-                    chain: window.GenLayerBridge.chains.testnetBradbury,
-                    transport: window.GenLayerBridge.custom(window.ethereum),
-                    account: state.playerAddr,
+        // ── GenLayer SDK — AI FACT-CHECK via on-chain LLM consensus ──
+        if (!window.GenLayerBridge || !window.ethereum) {
+            throw new Error("GenLayer Bridge or MetaMask not detected. Install MetaMask and refresh.");
+        }
+
+        addLog(`📡 Connecting to <span class="highlight">Bradbury Testnet</span>...`);
+
+        // Override chain RPC so SDK's internal publicClient uses our working RPC
+        // (rpc-bradbury.genlayer.com is currently unreachable)
+        const bradbury = window.GenLayerBridge.chains.testnetBradbury;
+        const customChain = Object.assign({}, bradbury, {
+            rpcUrls: { default: { http: [RPC_URL] } }
+        });
+
+        const glClient = window.GenLayerBridge.createClient({
+            chain: customChain,
+            account: state.playerAddr,
+            provider: window.ethereum,
+        });
+
+        // Switch wallet to GenLayer Bradbury network
+        try {
+            await window.ethereum.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: CHAIN_ID_HEX }],
+            });
+        } catch (switchErr) {
+            if (switchErr.code === 4902) {
+                await window.ethereum.request({
+                    method: "wallet_addEthereumChain",
+                    params: [{
+                        chainId: CHAIN_ID_HEX,
+                        chainName: "GenLayer Bradbury Testnet",
+                        nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+                        rpcUrls: [RPC_URL],
+                        blockExplorerUrls: [EXPLORER_URL],
+                    }],
                 });
-                
-                addLog("⛓️ Sending AI judge transaction to GenLayer validators...");
-                
-                const txHash = await glClient.writeContract({
+            } else {
+                throw switchErr;
+            }
+        }
+        addLog("🔗 Wallet on Bradbury Testnet");
+
+        // ── STEP 1: Send TX to GenLayer (LLM consensus via validators) ──
+        addLog("⛓️ Sending AI judge TX to GenLayer...");
+
+        let txHash = null;
+        let fullTx  = null;
+        const judgeStart = Date.now();
+
+        // Retry writeContract up to 2 times
+        for (let attempt = 1; attempt <= 2 && !txHash; attempt++) {
+            try {
+                if (attempt > 1) {
+                    addLog(`🔄 Retry attempt ${attempt}...`);
+                    await new Promise(r => setTimeout(r, 3000));
+                }
+                txHash = await glClient.writeContract({
                     address: JUDGE_CONTRACT,
                     functionName: "judge_claims",
                     args: [state.currentRoomId, room.theme || "General Knowledge", claimsSummary],
                     value: BigInt(0),
+                    leaderOnly: true,
                 });
-                
-                addLog(`📝 TX submitted: ${txHash.substring(0, 10)}...`);
-                addLog("⏳ Waiting for validator consensus (this may take up to 2 min)...");
-                
-                const receipt = await glClient.waitForTransactionReceipt({
+            } catch (txErr) {
+                console.warn(`[GenLayer] writeContract attempt ${attempt} failed:`, txErr.message);
+                if (attempt === 2) addLog("⚠️ GenLayer TX could not be submitted — using fallback.");
+            }
+        }
+
+        if (txHash) {
+            addLog(`📝 TX: <a href="${EXPLORER_URL}tx/${txHash}" target="_blank">${txHash.substring(0, 12)}…</a>`);
+            addLog("⏳ Waiting for GenLayer consensus...");
+
+            // ── STEP 2: Wait for receipt ──
+            try {
+                fullTx = await glClient.waitForTransactionReceipt({
                     hash: txHash,
                     status: "ACCEPTED",
-                    retries: 9,
+                    retries: 60,
                     interval: 5000,
+                    fullTransaction: true,
                 });
-                
-                console.log("[GenLayer] Receipt status:", receipt.status);
-                
-                if (receipt) {
-                    // Transaction completed successfully. Now read the stored result from state!
-                    const resultStr = await glClient.readContract({
-                        address: JUDGE_CONTRACT,
-                        functionName: "get_verdicts",
-                        args: [state.currentRoomId]
-                    });
-                    
-                    if (resultStr && resultStr !== "{}") {
+                console.log("[GenLayer] Full TX receipt:", JSON.stringify(fullTx).substring(0, 2000));
+                addLog("✅ GenLayer consensus reached!");
+            } catch (receiptErr) {
+                console.warn("[GenLayer] Receipt error:", receiptErr);
+                addLog("⚠️ Consensus failed — using fallback.");
+            }
+        }
+
+        // Ensure judging screen shows for at least 4 seconds
+        const elapsed = Date.now() - judgeStart;
+        if (elapsed < 4000) await new Promise(r => setTimeout(r, 4000 - elapsed));
+
+        // ── STEP 3: Extract verdicts from consensus data ──
+        if (fullTx) {
+            // Search the TX data for JSON verdicts
+            const txStr = JSON.stringify(fullTx);
+            console.log("[GenLayer] Searching TX data for verdicts...", txStr.substring(0, 500));
+
+            // Try leader_receipt → result → payload (contains strict_eq output)
+            const cd = fullTx.consensus_data || fullTx.consensusData || {};
+            const leaderReceipts = cd.leader_receipt || cd.leaderReceipt || [];
+            for (const lr of (Array.isArray(leaderReceipts) ? leaderReceipts : [leaderReceipts])) {
+                const payload = lr?.result?.payload || lr?.genvm_result?.stdout || "";
+                if (payload && payload.includes("{")) {
+                    try {
+                        const parsed = JSON.parse(payload);
+                        for (const [key, value] of Object.entries(parsed)) {
+                            for (const addr of claimAddrs) {
+                                if (key.includes(addr) || addr.includes(key)) {
+                                    verdicts[addr] = !!value;
+                                }
+                            }
+                        }
+                    } catch (e) { console.warn("Parse attempt:", e); }
+                }
+                // Also check eq_outputs
+                const eqOut = lr?.eq_outputs || {};
+                for (const eqVal of Object.values(eqOut)) {
+                    if (typeof eqVal === "string" && eqVal.includes("{")) {
                         try {
-                            const parsed = JSON.parse(resultStr);
-                            // Map the parsed verdicts to our address format
+                            const parsed = JSON.parse(eqVal);
                             for (const [key, value] of Object.entries(parsed)) {
-                                // Key might be the full address or a partial match
                                 for (const addr of claimAddrs) {
                                     if (key.includes(addr) || addr.includes(key)) {
-                                        verdicts[addr] = value;
+                                        verdicts[addr] = !!value;
                                     }
                                 }
                             }
-                        } catch (pe) {
-                            console.error("Failed to parse GenLayer result:", resultStr);
-                        }
-                    } else {
-                        throw new Error("get_verdicts returned empty JSON");
+                        } catch (e) { console.warn("EQ parse attempt:", e); }
                     }
                 }
-                
-                if (Object.keys(verdicts).length > 0) {
-                    addLog("✅ GenLayer validators reached consensus!");
+            }
+
+            // Fallback: search entire TX JSON for a JSON-like verdict pattern
+            if (Object.keys(verdicts).length === 0) {
+                const jsonMatch = txStr.match(/\{[^{}]*"0x[a-fA-F0-9]+"[^{}]*:[\s]*(true|false)[^{}]*\}/g);
+                if (jsonMatch) {
+                    for (const match of jsonMatch) {
+                        try {
+                            const parsed = JSON.parse(match);
+                            for (const [key, value] of Object.entries(parsed)) {
+                                for (const addr of claimAddrs) {
+                                    if (key.includes(addr) || addr.includes(key)) {
+                                        verdicts[addr] = !!value;
+                                    }
+                                }
+                            }
+                        } catch (e) {}
+                    }
                 }
-            } catch (glErr) {
-                console.error("GenLayer SDK error:", glErr);
-                addLog(`⚠️ GenLayer failed to prompt Wallet: ${glErr.message.substring(0, 100)}`);
-                addLog("⚠️ Using backup AI instead...");
             }
         }
-        
-        // FALLBACK: Use Pollinations API if GenLayer didn't return verdicts
+
+        // ── STEP 4: If no verdicts from TX data, try readContract (gen_call) ──
         if (Object.keys(verdicts).length === 0) {
-            addLog("🔄 AI Judge verifying facts via external LLM...");
-            verdicts = await pollinationsFactCheck(claims, room.theme);
+            addLog("📖 Trying to read verdicts from contract state...");
+            try {
+                const resultStr = await glClient.readContract({
+                    address: JUDGE_CONTRACT,
+                    functionName: "get_verdicts",
+                    args: [state.currentRoomId],
+                });
+                console.log("[GenLayer] readContract result:", resultStr);
+                if (resultStr && resultStr !== "{}" && resultStr !== "null") {
+                    const parsed = JSON.parse(resultStr);
+                    for (const [key, value] of Object.entries(parsed)) {
+                        for (const addr of claimAddrs) {
+                            if (key.includes(addr) || addr.includes(key)) {
+                                verdicts[addr] = !!value;
+                            }
+                        }
+                    }
+                }
+            } catch (readErr) {
+                console.warn("[GenLayer] readContract error:", readErr.message);
+                addLog("⚠️ Read error: " + readErr.message.substring(0, 60));
+            }
+        }
+
+        if (Object.keys(verdicts).length > 0) {
+            addLog("✅ AI Verdicts extracted from GenLayer!");
+        } else {
+            // ── FALLBACK: use player's own isLie declaration as the AI verdict ──
+            // (AI unavailable — trust declarations: truth=true, lie=false)
+            addLog("⚖️ GenLayer unavailable — verdicts from declarations.");
+            for (const addr of claimAddrs) {
+                const claimData = claims[addr];
+                // If player declared it a lie, the claim IS false; declared truth → assumed true
+                verdicts[addr] = claimData.isLie !== true;
+            }
+            showToast("⚠️ AI Judge offline — verdicts based on declarations", "warning");
+            addLog("✅ Declaration-based verdicts computed (AI fallback mode).");
         }
 
         addLog("✅ AI Verdict reached!");
@@ -749,67 +1027,6 @@ async function triggerAIJudge(room) {
 }
 
 // ══════════════════════════════════════════════════════
-//  EXTERNAL AI FACT-CHECK (fallback when GenLayer RPC
-//  doesn't return usable results)
-//  Uses the free open text.pollinations.ai LLM endpoint
-//  to guarantee real fact-checking in the browser.
-// ══════════════════════════════════════════════════════
-async function pollinationsFactCheck(claims, theme) {
-    const verdicts = {};
-
-    for (const [addr, claim] of Object.entries(claims)) {
-        const text = claim.text;
-        
-        // Chain-of-thought prompt: forces the AI to reason FIRST, then conclude.
-        // This prevents double-negative confusion and avoids being overly pedantic.
-        const prompt = `A player in a fun, casual trivia game made this statement about "${theme}":
-"${text}"
-
-Step 1: What is the general common knowledge fact?
-Step 2: Is the player's statement fundamentally true and aligned with public perception? (Be lenient on minor technicalities, focus on the core gist).
-Step 3: Write your final answer as VERDICT: TRUE (if it generally matches reality) or VERDICT: FALSE (if it's a blatant lie or completely wrong).`;
-
-        const url = 'https://text.pollinations.ai/prompt/' + encodeURIComponent(prompt) + '?model=openai';
-        
-        try {
-            console.log("AI checking claim:", text);
-            const res = await fetch(url);
-            
-            if (!res.ok) {
-                console.error("AI API status:", res.status);
-                verdicts[addr] = false;
-                continue;
-            }
-            
-            const responseText = await res.text();
-            console.log("AI Response for", addr, ":", responseText);
-            
-            // Extract the VERDICT line from the chain-of-thought response
-            const upper = responseText.toUpperCase();
-            const vidx = upper.lastIndexOf("VERDICT:");
-            if (vidx !== -1) {
-                const after = upper.substring(vidx + 8).trim();
-                verdicts[addr] = after.startsWith("TRUE");
-            } else if (upper.includes("FALSE")) {
-                verdicts[addr] = false;
-            } else if (upper.includes("TRUE")) {
-                verdicts[addr] = true;
-            } else {
-                verdicts[addr] = false;
-            }
-            
-            await new Promise(r => setTimeout(r, 600));
-            
-        } catch (err) {
-            console.error("Pollinations AI error:", err);
-            verdicts[addr] = false; 
-        }
-    }
-    
-    return verdicts;
-}
-
-// ══════════════════════════════════════════════════════
 //  RESULTS DISPLAY
 // ══════════════════════════════════════════════════════
 function showResults(results, winner, claims) {
@@ -896,9 +1113,9 @@ function showLoadingBanner(msg) {
         b = document.createElement("div");
         b.id = "loadingBanner";
         b.style.cssText = `position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);
-            background:rgba(10,10,20,0.95);border:1px solid var(--gold);border-radius:12px;
-            padding:0.75rem 1.5rem;color:var(--gold);font-family:var(--font);font-size:0.85rem;
-            z-index:500;display:flex;align-items:center;gap:0.75rem;box-shadow:0 0 30px var(--gold-glow);`;
+            background:rgba(10,10,20,0.95);border:1px solid var(--purple);border-radius:12px;
+            padding:0.75rem 1.5rem;color:var(--purple);font-family:var(--font);font-size:0.85rem;
+            z-index:500;display:flex;align-items:center;gap:0.75rem;box-shadow:0 0 30px var(--purple-glow);`;
         document.body.appendChild(b);
     }
     b.innerHTML = `<div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0;"></div> ${msg}`;
@@ -944,6 +1161,7 @@ function showPhase(phase) {
         s.classList.remove("active","completed");
         if (s.dataset.phase === phase) s.classList.add("active");
     });
+    refreshIcons();
 }
 
 // ══════════════════════════════════════════════════════
@@ -1062,6 +1280,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadLeaderboard();
     addLog(`Bradbury Testnet <span class="highlight">GenLayer Engine</span> Ready.`);
     showPhase("NONE");
+    refreshIcons();
 });
 
 // ══════════════════════════════════════════════════════

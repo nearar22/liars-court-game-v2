@@ -14,7 +14,7 @@ class LiarsCourtJudge(gl.Contract):
     last_verdicts: TreeMap[str, str]
 
     def __init__(self):
-        self.last_verdicts = TreeMap()
+        pass
 
     @gl.public.write
     def judge_claims(self, room_id: str, theme: str, claims_text: str) -> None:
@@ -39,7 +39,7 @@ No markdown formatting, no explanations, ONLY raw JSON."""
             parsed = json.loads(raw)
             return json.dumps(parsed, sort_keys=True)
 
-        result_str = gl.eq_principle.strict_eq(ask_llm)
+        result_str = gl.eq_principle.nondet(ask_llm)
         self.last_verdicts[room_id] = result_str
 
     @gl.public.view

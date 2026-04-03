@@ -1,5 +1,5 @@
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
-import genlayer.gl as gl
 import json
 
 
@@ -20,13 +20,13 @@ class LiarsCourt(gl.Contract):
     # ═══════════════════════════════════════
     #  STORAGE
     # ═══════════════════════════════════════
-    total_rooms: int
+    total_rooms: u64
     # room_id -> JSON string of room data
-    rooms: TreeMap[int, str]
+    rooms: TreeMap[u64, str]
     # address -> total score
-    scores: TreeMap[Address, int]
+    scores: TreeMap[Address, i64]
     # address -> total wins
-    wins: TreeMap[Address, int]
+    wins: TreeMap[Address, u64]
 
     def __init__(self):
         self.total_rooms = 0
@@ -144,6 +144,35 @@ class LiarsCourt(gl.Contract):
     # ═══════════════════════════════════════
 
     @gl.public.write
+    def judge_claims_direct(self, theme: str, claims_json: str) -> str:
+        """
+        AI fact-checks claims passed directly from the frontend.
+        No room lookup needed — claims come from Firebase via the caller.
+        Uses nondet so validators don't need to agree exactly on LLM output.
+        Returns a JSON string: {"0xAddr1": true, "0xAddr2": false}
+        """
+        batch_prompt = f"""You are a strict fact-checker judge in a game called "Liar's Court".
+THEME: {theme}
+
+CLAIMS TO CHECK:
+{claims_json}
+
+TASK: For each player's claim, determine if it is factually TRUE or FALSE based on your knowledge.
+Be lenient — if the claim is generally accurate, mark it true.
+Only mark false if the claim is clearly and obviously wrong.
+Respond with a JSON object where keys are the exact player addresses and values are booleans.
+Example: {{"0xAddr1": true, "0xAddr2": false}}
+Return ONLY the raw JSON object. No markdown, no explanation."""
+
+        def ask_llm() -> str:
+            raw = gl.nondet.exec_prompt(batch_prompt)
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(raw)
+            return json.dumps(parsed, sort_keys=True)
+
+        return gl.eq_principle.nondet(ask_llm)
+
+    @gl.public.write
     def judge_claims(self, room_id: int):
         """
         AI fact-checks all claims using web access + LLM.
@@ -168,21 +197,21 @@ THEME: {room["theme"]}
 CLAIMS TO CHECK:
 {claims_summary}
 
-任务: For each player's claim, determine if it is factually TRUE or FALSE based on your general knowledge and the theme.
-Respond with a JSON object where keys are the player addresses and values are booleans (true for factually true, false for factually false).
+TASK: For each player's claim, determine if it is factually TRUE or FALSE based on your general knowledge and the theme.
+Be lenient — if the claim is generally true or mostly accurate, mark it as true.
+Only mark false if the claim is clearly, obviously wrong.
+Respond with a JSON object where keys are the exact player addresses and values are booleans.
 Example: {{"0xAddr1": true, "0xAddr2": false}}
-Return ONLY the JSON object."""
+Return ONLY the raw JSON object. No markdown, no explanation."""
 
         # Use Equivalence Principle for consensus on the whole batch
-        verdicts_json = gl.eq_principle.prompt_non_comparative(
-            batch_prompt,
-            expected_type=str,
-        )
-        
-        # Clean potential markdown from LLM
-        verdicts_json = verdicts_json.strip()
-        if verdicts_json.startswith("```json"): verdicts_json = verdicts_json[7:]
-        if verdicts_json.endswith("```"): verdicts_json = verdicts_json[:-3]
+        def ask_llm() -> str:
+            raw = gl.nondet.exec_prompt(batch_prompt)
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(raw)
+            return json.dumps(parsed, sort_keys=True)
+
+        verdicts_json = gl.eq_principle.strict_eq(ask_llm)
         
         try:
             verdicts = json.loads(verdicts_json)
@@ -334,3 +363,17 @@ No markdown, no explanation, ONLY valid JSON."""
             return self.wins[player]
         except:
             return 0
+
+    @gl.public.view
+    def get_total_rooms(self) -> int:
+        """Get the total number of rooms created."""
+        return self.total_rooms
+
+    @gl.public.view
+    def get_room_phase(self, room_id: int) -> str:
+        """Quick check: get only the current phase of a room."""
+        try:
+            room = json.loads(self.rooms[room_id])
+            return room.get("phase", "UNKNOWN")
+        except:
+            return "NOT_FOUND"
