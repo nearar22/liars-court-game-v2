@@ -16,9 +16,16 @@
  * for the AI judging step since it's triggered via backend-style RPC).
  */
 
+// Global BigInt JSON support — viem, Firebase, and other libs JSON.stringify
+// objects that may contain BigInts (block numbers, gas, etc.); without this
+// shim they throw "Do not know how to serialize a BigInt".
+if (typeof BigInt !== "undefined" && !BigInt.prototype.toJSON) {
+    // eslint-disable-next-line no-extend-native
+    BigInt.prototype.toJSON = function () { return this.toString(); };
+}
+
 const RPC_URL          = "https://zksync-os-testnet-genlayer.zksync.dev/";
-const CONTRACT_ADDRESS = "0xc0A588DDa3F6Da4040c3937913997db05F5A81ea";
-const JUDGE_CONTRACT   = "0xA495B812489276D9D281CFF0A3226eDAF7Dc62A4";
+const JUDGE_CONTRACT   = "0x07CD2727a3803B3Dc1691852b4Cdfd9e89dc06F0";
 const CHAIN_ID_HEX     = "0x107D"; // GenLayer Bradbury = 4221 decimal
 const CHAIN_ID_DEC     = 4221;
 const EXPLORER_URL     = "https://explorer-bradbury.genlayer.com/";
@@ -44,14 +51,169 @@ const $$ = sel => document.querySelectorAll(sel);
 function refreshIcons() { if (window.lucide) lucide.createIcons(); }
 function shortAddr(a) { return a ? a.slice(0,6)+"..."+a.slice(38) : "???"; }
 
+// Prevent XSS — sanitize any user-generated text before inserting into HTML
+function sanitize(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function addLog(msg) {
     const log = $("#activityLog");
     const t = new Date();
     const hh = t.getHours().toString().padStart(2,"0");
     const mm = t.getMinutes().toString().padStart(2,"0");
-    log.innerHTML = `<div class="log-entry"><span class="log-time">${hh}:${mm}</span><span class="log-msg">${msg}</span></div>` + log.innerHTML;
-    if (log.children.length > 25) log.lastChild.remove();
+    log.insertAdjacentHTML("afterbegin",
+        `<li class="log-entry"><span class="log-msg">${msg}</span><span class="log-time">${hh}:${mm}</span></li>`);
+    while (log.children.length > 12) log.lastChild.remove();
 }
+
+// ── PROFILE SYSTEM ─────────────────────────────────────
+const profileCache = {}; // { addr: profile }
+let profilesListener = null;
+
+function listenToAllProfiles() {
+    if (profilesListener) return;
+    profilesListener = db.ref("profiles").on("value", snap => {
+        const all = snap.val() || {};
+        for (const [addr, p] of Object.entries(all)) {
+            profileCache[addr.toLowerCase()] = p;
+        }
+        // Re-render any active player views
+        const room = state._lastRoom;
+        if (room) renderPlayers(room.players || {}, room.maxPlayers || 4, room.host);
+        loadLeaderboardOnce();
+    });
+}
+
+function listenToMyProfile() {
+    if (!state.playerAddr) return;
+    listenToAllProfiles();
+    db.ref(`profiles/${state.playerAddr}`).once("value").then(snap => {
+        const p = snap.val();
+        if (p) {
+            profileCache[state.playerAddr.toLowerCase()] = p;
+            applyMyProfileToUI(p);
+        }
+    });
+}
+
+function applyMyProfileToUI(p) {
+    if (p.avatar) $("#profileBtnAvatar").textContent = p.avatar;
+    if (p.displayName) {
+        state.playerName = p.displayName;
+        $("#connectWalletBtn").textContent = `⚡ ${p.displayName}`;
+    }
+}
+
+function getProfile(addr) {
+    if (!addr) return null;
+    return profileCache[addr.toLowerCase()] || null;
+}
+
+function profileAvatar(addr, fallback = "🎭") {
+    const p = getProfile(addr);
+    return p?.avatar || fallback;
+}
+
+function profileName(addr) {
+    const p = getProfile(addr);
+    return p?.displayName || shortAddr(addr || "");
+}
+
+function openProfileModal() {
+    if (!state.connected) return alert("Connect wallet first!");
+    const p = getProfile(state.playerAddr) || {};
+    $("#profileName").value    = p.displayName || "";
+    $("#profileBio").value     = p.bio || "";
+    $("#profileX").value       = p.socials?.x || "";
+    $("#profileDiscord").value = p.socials?.discord || "";
+    // Mark selected avatar
+    const current = p.avatar || "🦊";
+    $$(".avatar-option").forEach(b => {
+        b.classList.toggle("selected", b.dataset.emoji === current);
+    });
+    $("#profileModal").classList.add("visible");
+}
+
+function closeProfileModal() {
+    $("#profileModal").classList.remove("visible");
+}
+
+async function saveMyProfile() {
+    if (!state.playerAddr) return;
+    const selected = $(".avatar-option.selected");
+    const profile = {
+        avatar:      selected ? selected.dataset.emoji : "🦊",
+        displayName: sanitize($("#profileName").value.trim()) || shortAddr(state.playerAddr),
+        bio:         sanitize($("#profileBio").value.trim()),
+        socials: {
+            x:       sanitize($("#profileX").value.trim().replace(/^@/, "")),
+            discord: sanitize($("#profileDiscord").value.trim()),
+        },
+        updatedAt:   Date.now(),
+    };
+    try {
+        await db.ref(`profiles/${state.playerAddr}`).set(profile);
+        profileCache[state.playerAddr.toLowerCase()] = profile;
+        applyMyProfileToUI(profile);
+        showToast("Profile saved!", "success");
+        closeProfileModal();
+    } catch (err) {
+        showToast("Failed to save: " + err.message, "error");
+    }
+}
+
+function showProfilePopover(addr, anchor) {
+    const p = getProfile(addr) || {};
+    const pop = $("#profilePopover");
+    $("#popAvatar").textContent = p.avatar || "🎭";
+    $("#popName").textContent   = p.displayName || shortAddr(addr);
+    $("#popAddr").textContent   = shortAddr(addr);
+    $("#popBio").textContent    = p.bio || "";
+    const socials = $("#popSocials");
+    socials.innerHTML = "";
+    if (p.socials?.x) {
+        socials.insertAdjacentHTML("beforeend",
+            `<a class="social-link" target="_blank" rel="noopener" href="https://x.com/${encodeURIComponent(p.socials.x)}">𝕏 ${p.socials.x}</a>`);
+    }
+    if (p.socials?.discord) {
+        socials.insertAdjacentHTML("beforeend",
+            `<button class="social-link" data-copy="${p.socials.discord}">💬 ${p.socials.discord}</button>`);
+    }
+    // Position near anchor
+    const rect = anchor.getBoundingClientRect();
+    pop.hidden = false;
+    const popRect = pop.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - popRect.width/2;
+    let top  = rect.bottom + 10;
+    // Clamp to viewport
+    left = Math.max(8, Math.min(left, window.innerWidth - popRect.width - 8));
+    if (top + popRect.height > window.innerHeight - 8) {
+        top = rect.top - popRect.height - 10;
+    }
+    pop.style.left = `${left}px`;
+    pop.style.top  = `${top}px`;
+    // Discord copy handler
+    socials.querySelectorAll("[data-copy]").forEach(btn => {
+        btn.onclick = () => {
+            navigator.clipboard.writeText(btn.dataset.copy);
+            showToast("Discord username copied!", "success");
+        };
+    });
+}
+
+function hideProfilePopover() {
+    $("#profilePopover").hidden = true;
+}
+
+document.addEventListener("click", (e) => {
+    const pop = $("#profilePopover");
+    if (!pop || pop.hidden) return;
+    if (!pop.contains(e.target) && !e.target.closest("[data-player-addr]")) {
+        hideProfilePopover();
+    }
+});
 
 // ── TOAST NOTIFICATIONS ────────────────────────────────
 function showToast(msg, type = "info") {
@@ -231,6 +393,8 @@ async function connectWallet() {
     state.connected  = true;
     $("#connectWalletBtn").textContent = `⚡ ${state.playerName}`;
     $("#connectWalletBtn").classList.add("connected");
+    $("#profileBtn").hidden = false;
+    listenToMyProfile();
     addLog(`Wallet: <span class="highlight">${state.playerName}</span>`);
 
     // Check current network
@@ -301,13 +465,15 @@ function loadRoomList() {
 
             const li = document.createElement("li");
             li.className = "room-item";
+            const phaseLabel = phase.charAt(0) + phase.slice(1).toLowerCase();
             li.innerHTML = `
                 <div class="room-item-info">
-                    <strong>${room.name || "Court"}</strong>
-                    <span class="room-item-meta">${room.theme} · ${pc}/${room.maxPlayers||4} · ${phase}</span>
+                    <strong>${sanitize(room.name || "Court")}</strong>
+                    <span class="room-item-meta">${sanitize(room.theme)} · ${pc}/${room.maxPlayers||4}</span>
                 </div>
-                <div style="display:flex;gap:0.5rem;align-items:center;">
-                    ${isMyRoom ? `<button class="room-del-btn" style="background:var(--crimson);border:none;border-radius:6px;cursor:pointer;padding:0.4rem 0.6rem;font-size:0.9rem;" title="Delete this room">🗑️</button>` : ""}
+                <div class="room-item-actions">
+                    <span class="pill pill-violet">${phaseLabel}</span>
+                    ${isMyRoom ? `<button class="room-del-btn" title="Delete this room">🗑</button>` : ""}
                     <button class="room-join-btn" data-id="${id}">JOIN</button>
                 </div>`;
                 
@@ -323,7 +489,12 @@ function loadRoomList() {
         });
 
         if (!found) {
-            list.innerHTML = '<li style="color:var(--text-dim);text-align:center;padding:1rem;font-size:0.8rem;">No active courts. Create one!</li>';
+            list.innerHTML = `
+                <li class="room-empty">
+                    <div class="room-empty-icon">⚖</div>
+                    <div class="room-empty-title">The chamber is silent</div>
+                    <div class="room-empty-sub">No active courts yet. Open the first session.</div>
+                </li>`;
         }
     });
 }
@@ -334,7 +505,6 @@ function loadRoomList() {
 function closeModal() {
     const m = $("#createRoomModal");
     m.classList.remove("visible");
-    setTimeout(() => { if (!m.classList.contains("visible")) m.style.display = "none"; }, 350);
 }
 
 async function createRoom() {
@@ -344,20 +514,30 @@ async function createRoom() {
     const code   = String(Date.now()).slice(-6);
     closeModal();
 
-    const roomData = {
-        name, maxPlayers: maxP,
-        theme: state.selectedTheme,
-        phase: "LOBBY",
-        host:  state.playerAddr,
-        createdAt: Date.now(),
-        players: { [state.playerAddr]: { name: state.playerName, address: state.playerAddr } },
-    };
-    await db.ref("rooms/" + code).set(roomData);
-    state.currentRoomId = code;
-    state.isHost = true;
-    sessionStorage.setItem("activeRoom", code);
-    listenToRoom(code);
-    addLog(`Court <span class="highlight">${name}</span> created! Code: <strong>${code}</strong>`);
+    const btn = $("#createRoomBtn");
+    btn.disabled = true;
+    btn.textContent = "CREATING...";
+
+    try {
+        const roomData = {
+            name: sanitize(name), maxPlayers: maxP,
+            theme: state.selectedTheme,
+            phase: "LOBBY",
+            host:  state.playerAddr,
+            createdAt: Date.now(),
+            players: { [state.playerAddr]: { name: sanitize(state.playerName), address: state.playerAddr } },
+        };
+        await db.ref("rooms/" + code).set(roomData);
+        state.currentRoomId = code;
+        state.isHost = true;
+        sessionStorage.setItem("activeRoom", code);
+        listenToRoom(code);
+        addLog(`Court <span class="highlight">${sanitize(name)}</span> created! Code: <strong>${code}</strong>`);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="plus-circle" style="width:14px;height:14px;display:inline;vertical-align:middle;margin-right:4px;"></i> Create New Court';
+        refreshIcons();
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -365,33 +545,50 @@ async function createRoom() {
 // ══════════════════════════════════════════════════════
 async function joinRoom(code) {
     if (!state.connected) return alert("Connect wallet first!");
-    const snap = await db.ref("rooms/" + code).once("value");
-    const room = snap.val();
-    if (!room) return alert("Room not found!");
 
-    const players = room.players ? Object.keys(room.players) : [];
-    if (players.length >= (room.maxPlayers||4)) return alert("Room is full!");
+    const joinBtn = $(`.room-join-btn[data-id="${code}"]`);
+    if (joinBtn) { joinBtn.disabled = true; joinBtn.textContent = "JOINING..."; }
 
-    // Check already in room
-    const alreadyIn = players.some(p => p.toLowerCase() === state.playerAddr.toLowerCase());
-    if (!alreadyIn) {
-        await db.ref(`rooms/${code}/players/${state.playerAddr}`).set({
-            name: state.playerName, address: state.playerAddr
-        });
+    try {
+        const snap = await db.ref("rooms/" + code).once("value");
+        const room = snap.val();
+        if (!room) { alert("Room not found!"); return; }
+
+        const players = room.players ? Object.keys(room.players) : [];
+        if (players.length >= (room.maxPlayers||4)) { alert("Room is full!"); return; }
+
+        // Check already in room
+        const alreadyIn = players.some(p => p.toLowerCase() === state.playerAddr.toLowerCase());
+        if (!alreadyIn) {
+            await db.ref(`rooms/${code}/players/${state.playerAddr}`).set({
+                name: sanitize(state.playerName), address: state.playerAddr
+            });
+        }
+
+        state.currentRoomId = code;
+        state.isHost = room.host?.toLowerCase() === state.playerAddr.toLowerCase();
+        sessionStorage.setItem("activeRoom", code);
+        listenToRoom(code);
+        addLog(`Joined <span class="highlight">${sanitize(room.name)}</span>!`);
+    } finally {
+        if (joinBtn) { joinBtn.disabled = false; joinBtn.textContent = "JOIN"; }
     }
-
-    state.currentRoomId = code;
-    state.isHost = room.host?.toLowerCase() === state.playerAddr.toLowerCase();
-    sessionStorage.setItem("activeRoom", code);
-    listenToRoom(code);
-    addLog(`Joined <span class="highlight">${room.name}</span>!`);
 }
 
 async function joinByCode() {
     const code = $("#joinCodeInput").value.trim();
     if (!code) return alert("Enter a room code!");
     if (!state.connected) return alert("Connect wallet first!");
-    await joinRoom(code);
+
+    const btn = $("#joinByCodeBtn");
+    btn.disabled = true;
+    btn.textContent = "JOINING...";
+    try {
+        await joinRoom(code);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "JOIN";
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -407,6 +604,7 @@ function listenToRoom(code) {
         const room = snap.val();
         if (!room) return;
         state.roomData = room;
+        state._lastRoom = room;
         state.isHost   = room.host?.toLowerCase() === state.playerAddr.toLowerCase();
 
         // ── Update UI ──
@@ -477,7 +675,7 @@ function listenToRoom(code) {
                 triggerAIJudge(room).finally(() => { state._judging = false; });
             }
             if (room.phase === "RESULTS" && room.results) {
-                showResults(room.results, room.winner, room.claims);
+                showResults(room.results, room.winner, room.claims, room.judgeTx);
                 launchConfetti();
                 playSound("win");
                 const wd = room.results[room.winner];
@@ -490,7 +688,7 @@ function listenToRoom(code) {
             buildVotingUI(room.claims);
         }
         if (room.phase === "RESULTS" && room.results) {
-            showResults(room.results, room.winner, room.claims);
+            showResults(room.results, room.winner, room.claims, room.judgeTx);
         }
     });
 }
@@ -500,17 +698,20 @@ function listenToRoom(code) {
 // ══════════════════════════════════════════════════════
 function renderPlayers(players, max, host) {
     const grid   = $("#playersGrid");
-    const avatars = ["🦊","🐺","🦅","🐲"];
+    const fallbacks = ["🦊","🐺","🦅","🐲"];
     let html = "";
     for (let i = 0; i < max; i++) {
         const p = players[i];
         if (p) {
-            const isYou  = p.address?.toLowerCase() === state.playerAddr.toLowerCase();
-            const isHost = p.address?.toLowerCase() === host?.toLowerCase();
-            html += `<div class="player-slot occupied ${isYou?"you":""} animate-in">
+            const addr   = p.address || "";
+            const isYou  = addr.toLowerCase() === state.playerAddr.toLowerCase();
+            const isHost = addr.toLowerCase() === host?.toLowerCase();
+            const avatar = profileAvatar(addr, fallbacks[i%4]);
+            const name   = profileName(addr) !== shortAddr(addr) ? profileName(addr) : (p.name || shortAddr(addr));
+            html += `<div class="player-slot occupied ${isYou?"you":""} animate-in" data-player-addr="${addr}">
                 ${isHost ? '<div class="player-badge-you">HOST</div>' : ""}
-                <div class="player-avatar">${avatars[i%4]}</div>
-                <div class="player-name">${isYou ? "YOU" : (p.name || shortAddr(p.address))}</div>
+                <div class="player-avatar">${avatar}</div>
+                <div class="player-name">${isYou ? "YOU" : name}</div>
                 <div class="player-status"><span class="status-dot"></span> Online</div>
             </div>`;
         } else {
@@ -522,6 +723,15 @@ function renderPlayers(players, max, host) {
         }
     }
     grid.innerHTML = html;
+    // Attach popover triggers
+    grid.querySelectorAll("[data-player-addr]").forEach(slot => {
+        slot.onclick = (e) => {
+            e.stopPropagation();
+            const addr = slot.dataset.playerAddr;
+            if (!addr) return;
+            showProfilePopover(addr, slot);
+        };
+    });
 }
 
 // ══════════════════════════════════════════════════════
@@ -530,18 +740,24 @@ function renderPlayers(players, max, host) {
 async function startGame() {
     if (!state.currentRoomId || !state.isHost) return;
 
+    const btn = $("#startGameBtn");
+    btn.disabled = true;
+    btn.textContent = "STARTING...";
     addLog("Starting game...");
     showLoadingBanner("Starting game...");
 
     try {
         await db.ref("rooms/" + state.currentRoomId).update({
             phase: "CLAIMING",
+            roundId: Date.now(), // unique per round → contract key is fresh on every restart
         });
 
         hideLoadingBanner();
         addLog("🏛️ Game started! Submit your claims.");
     } catch (err) {
         hideLoadingBanner();
+        btn.disabled = false;
+        btn.textContent = "▶ START GAME";
         addLog(`❌ Error: ${err.message}`);
     }
 }
@@ -559,9 +775,9 @@ async function submitClaim() {
     btn.textContent = "SUBMITTING...";
 
     try {
-        // Save claim to Firebase
+        // Save claim to Firebase (sanitized for XSS)
         await db.ref(`rooms/${state.currentRoomId}/claims/${state.playerAddr}`).set({
-            text, isLie, username: state.playerName
+            text: sanitize(text), isLie, username: sanitize(state.playerName)
         });
         state.myClaim = { text, isLie };
         addLog("✅ Claim submitted!");
@@ -569,15 +785,23 @@ async function submitClaim() {
         playSound("submit");
         stopCountdown();
 
-        // Check if all players submitted → move to VOTING
-        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
+        // Check if all players submitted → move to VOTING (using transaction to prevent race condition)
+        const roomRef = db.ref("rooms/" + state.currentRoomId);
+        await roomRef.transaction(currentRoom => {
+            if (!currentRoom) return currentRoom;
+            const pc = currentRoom.players ? Object.keys(currentRoom.players).length : 0;
+            const cc = currentRoom.claims ? Object.keys(currentRoom.claims).length : 0;
+            if (cc >= pc && currentRoom.phase === "CLAIMING") {
+                currentRoom.phase = "VOTING";
+            }
+            return currentRoom;
+        });
+        // Show waiting if still in CLAIMING
+        const snap = await roomRef.once("value");
         const room = snap.val();
-        const pc = Object.keys(room.players).length;
-        const cc = room.claims ? Object.keys(room.claims).length : 0;
-
-        if (cc >= pc) {
-            await db.ref("rooms/" + state.currentRoomId).update({ phase: "VOTING" });
-        } else {
+        if (room && room.phase === "CLAIMING") {
+            const pc = Object.keys(room.players).length;
+            const cc = room.claims ? Object.keys(room.claims).length : 0;
             showPhase("WAITING");
             $("#waitingText").textContent = `Waiting for ${pc - cc} more player(s)...`;
         }
@@ -679,15 +903,23 @@ async function submitVotes() {
         playSound("vote");
         stopCountdown();
 
-        // Check if all voted → move to JUDGING
-        const snap = await db.ref("rooms/" + state.currentRoomId).once("value");
+        // Check if all voted → move to JUDGING (using transaction to prevent race condition)
+        const roomRef = db.ref("rooms/" + state.currentRoomId);
+        await roomRef.transaction(currentRoom => {
+            if (!currentRoom) return currentRoom;
+            const pc = currentRoom.players ? Object.keys(currentRoom.players).length : 0;
+            const vc = currentRoom.votes ? Object.keys(currentRoom.votes).length : 0;
+            if (vc >= pc && currentRoom.phase === "VOTING") {
+                currentRoom.phase = "JUDGING";
+            }
+            return currentRoom;
+        });
+        // Show waiting if still in VOTING
+        const snap = await roomRef.once("value");
         const room = snap.val();
-        const pc = Object.keys(room.players).length;
-        const vc = room.votes ? Object.keys(room.votes).length : 0;
-
-        if (vc >= pc) {
-            await db.ref("rooms/" + state.currentRoomId).update({ phase: "JUDGING" });
-        } else {
+        if (room && room.phase === "VOTING") {
+            const pc = Object.keys(room.players).length;
+            const vc = room.votes ? Object.keys(room.votes).length : 0;
             showPhase("WAITING");
             $("#waitingText").textContent = `Waiting for ${pc - vc} more player(s)...`;
         }
@@ -712,6 +944,8 @@ async function triggerAIJudge(room) {
         const claims = room.claims || {};
         const votes  = room.votes || {};
         const players = room.players || {};
+        // Unique contract session key per round (avoids stale verdicts on replay in same room)
+        const sessionKey = `${state.currentRoomId}_${room.roundId || Date.now()}`;
 
         addLog("🧠 AI Judge is fact-checking all claims...");
         addLog(`📡 Querying GenLayer AI on <span class="highlight">Bradbury Testnet</span>...`);
@@ -782,23 +1016,29 @@ async function triggerAIJudge(room) {
         let fullTx  = null;
         const judgeStart = Date.now();
 
-        // Retry writeContract up to 2 times
-        for (let attempt = 1; attempt <= 2 && !txHash; attempt++) {
+        // Retry writeContract up to 3 times with exponential backoff
+        const MAX_RETRIES = 3;
+        for (let attempt = 1; attempt <= MAX_RETRIES && !txHash; attempt++) {
             try {
                 if (attempt > 1) {
-                    addLog(`🔄 Retry attempt ${attempt}...`);
-                    await new Promise(r => setTimeout(r, 3000));
+                    const delay = 3000 * attempt;
+                    addLog(`🔄 Retry attempt ${attempt}/${MAX_RETRIES}...`);
+                    showToast(`Retrying GenLayer TX (attempt ${attempt})...`, "warning");
+                    await new Promise(r => setTimeout(r, delay));
                 }
                 txHash = await glClient.writeContract({
                     address: JUDGE_CONTRACT,
                     functionName: "judge_claims",
-                    args: [state.currentRoomId, room.theme || "General Knowledge", claimsSummary],
+                    args: [sessionKey, room.theme || "General Knowledge", claimsSummary],
                     value: BigInt(0),
                     leaderOnly: true,
                 });
             } catch (txErr) {
                 console.warn(`[GenLayer] writeContract attempt ${attempt} failed:`, txErr.message);
-                if (attempt === 2) addLog("⚠️ GenLayer TX could not be submitted — using fallback.");
+                if (attempt === MAX_RETRIES) {
+                    addLog("⚠️ GenLayer TX could not be submitted — using fallback.");
+                    showToast("AI Judge unavailable. Using declaration-based verdicts.", "warning");
+                }
             }
         }
 
@@ -806,20 +1046,35 @@ async function triggerAIJudge(room) {
             addLog(`📝 TX: <a href="${EXPLORER_URL}tx/${txHash}" target="_blank">${txHash.substring(0, 12)}…</a>`);
             addLog("⏳ Waiting for GenLayer consensus...");
 
-            // ── STEP 2: Wait for receipt ──
+            // ── STEP 2: Wait for receipt — race fastest status that has leader output ──
+            // Since our `strict_eq` output is deterministic (booleans only), the leader's
+            // result at COMMITTING/PROPOSING already matches the final ACCEPTED state.
+            // Waiting for COMMITTING is much faster than full ACCEPTED consensus.
+            const tryStatus = (status, retries, interval) => glClient.waitForTransactionReceipt({
+                hash: txHash,
+                status,
+                retries,
+                interval,
+                fullTransaction: true,
+            });
             try {
-                fullTx = await glClient.waitForTransactionReceipt({
-                    hash: txHash,
-                    status: "ACCEPTED",
-                    retries: 60,
-                    interval: 5000,
-                    fullTransaction: true,
-                });
+                // Race: whichever status returns first wins. Most common is COMMITTING (fastest
+                // with leader output present). We also race ACCEPTED in case the TX is already
+                // past COMMITTING by the time we start polling.
+                const fastPromise = Promise.any([
+                    tryStatus("COMMITTING", 40, 3000),
+                    tryStatus("ACCEPTED",   40, 3000),
+                ]);
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Timeout: consensus took longer than 2 minutes")), 2 * 60 * 1000)
+                );
+                fullTx = await Promise.race([fastPromise, timeoutPromise]);
                 console.log("[GenLayer] Full TX receipt:", JSON.stringify(fullTx).substring(0, 2000));
-                addLog("✅ GenLayer consensus reached!");
+                addLog("✅ GenLayer leader output received!");
             } catch (receiptErr) {
                 console.warn("[GenLayer] Receipt error:", receiptErr);
-                addLog("⚠️ Consensus failed — using fallback.");
+                addLog("⚠️ Consensus delayed — using fallback.");
+                showToast(receiptErr.message?.includes("Timeout") ? "AI Judge timed out. Using fallback." : "Consensus failed. Using fallback.", "warning");
             }
         }
 
@@ -830,7 +1085,7 @@ async function triggerAIJudge(room) {
         // ── STEP 3: Extract verdicts from consensus data ──
         if (fullTx) {
             // Search the TX data for JSON verdicts
-            const txStr = JSON.stringify(fullTx);
+            const txStr = JSON.stringify(fullTx, (k, v) => typeof v === "bigint" ? v.toString() : v);
             console.log("[GenLayer] Searching TX data for verdicts...", txStr.substring(0, 500));
 
             // Try leader_receipt → result → payload (contains strict_eq output)
@@ -868,6 +1123,41 @@ async function triggerAIJudge(room) {
                 }
             }
 
+            // Bradbury runtime stores strict_eq output in `eqBlocksOutputs` (hex-encoded).
+            // Decode hex → ascii and look for the verdicts JSON object.
+            if (Object.keys(verdicts).length === 0) {
+                const eqHex = fullTx.eqBlocksOutputs || fullTx.eq_blocks_outputs || "";
+                if (typeof eqHex === "string" && eqHex.startsWith("0x")) {
+                    try {
+                        const cleanHex = eqHex.slice(2);
+                        let asciiStr = "";
+                        for (let i = 0; i + 1 < cleanHex.length; i += 2) {
+                            const ch = parseInt(cleanHex.substr(i, 2), 16);
+                            asciiStr += (ch >= 32 && ch < 127) ? String.fromCharCode(ch) : " ";
+                        }
+                        // Find first JSON object containing addresses + booleans
+                        const jsonRe = /\{[^{}]*"0x[a-fA-F0-9]{40}"[^{}]*\}/g;
+                        const matches = asciiStr.match(jsonRe);
+                        if (matches) {
+                            for (const m of matches) {
+                                try {
+                                    const parsed = JSON.parse(m);
+                                    for (const [key, value] of Object.entries(parsed)) {
+                                        for (const addr of claimAddrs) {
+                                            if (key.toLowerCase() === addr.toLowerCase()) {
+                                                verdicts[addr] = !!value;
+                                            }
+                                        }
+                                    }
+                                } catch (_) {}
+                            }
+                        }
+                    } catch (decodeErr) {
+                        console.warn("[GenLayer] eqBlocksOutputs decode error:", decodeErr);
+                    }
+                }
+            }
+
             // Fallback: search entire TX JSON for a JSON-like verdict pattern
             if (Object.keys(verdicts).length === 0) {
                 const jsonMatch = txStr.match(/\{[^{}]*"0x[a-fA-F0-9]+"[^{}]*:[\s]*(true|false)[^{}]*\}/g);
@@ -895,7 +1185,7 @@ async function triggerAIJudge(room) {
                 const resultStr = await glClient.readContract({
                     address: JUDGE_CONTRACT,
                     functionName: "get_verdicts",
-                    args: [state.currentRoomId],
+                    args: [sessionKey],
                 });
                 console.log("[GenLayer] readContract result:", resultStr);
                 if (resultStr && resultStr !== "{}" && resultStr !== "null") {
@@ -914,7 +1204,9 @@ async function triggerAIJudge(room) {
             }
         }
 
+        let aiVerified = false;
         if (Object.keys(verdicts).length > 0) {
+            aiVerified = true;
             addLog("✅ AI Verdicts extracted from GenLayer!");
         } else {
             // ── FALLBACK: use player's own isLie declaration as the AI verdict ──
@@ -922,7 +1214,6 @@ async function triggerAIJudge(room) {
             addLog("⚖️ GenLayer unavailable — verdicts from declarations.");
             for (const addr of claimAddrs) {
                 const claimData = claims[addr];
-                // If player declared it a lie, the claim IS false; declared truth → assumed true
                 verdicts[addr] = claimData.isLie !== true;
             }
             showToast("⚠️ AI Judge offline — verdicts based on declarations", "warning");
@@ -964,6 +1255,7 @@ async function triggerAIJudge(room) {
 
             results[addr] = {
                 verdict: isActuallyTrue,
+                ai_verified: aiVerified,
                 was_lie: playerSaidLie,
                 was_caught: wasCaught,
                 lie_votes: lieVotes,
@@ -1005,9 +1297,10 @@ async function triggerAIJudge(room) {
         //  STEP 3: SAVE RESULTS TO FIREBASE
         // ══════════════════════════════════════════════
         await db.ref("rooms/" + state.currentRoomId).update({
-            phase:   "RESULTS",
-            results: results,
-            winner:  winner,
+            phase:    "RESULTS",
+            results:  results,
+            winner:   winner,
+            judgeTx:  txHash || null,
         });
 
         hideLoadingBanner();
@@ -1029,22 +1322,35 @@ async function triggerAIJudge(room) {
 // ══════════════════════════════════════════════════════
 //  RESULTS DISPLAY
 // ══════════════════════════════════════════════════════
-function showResults(results, winner, claims) {
-    // Remove any old notes
-    $$("#winnerName ~ p").forEach(n => n.remove());
+function showResults(results, winner, claims, judgeTx) {
+    // Remove any old notes / TX badges
+    $$("#winnerName ~ p, #judgeTxLink").forEach(n => n.remove());
     $("#resultsOverlay").classList.add("visible");
     const wd = results[winner];
-    $("#winnerName").textContent = `🏆 Winner: ${wd?.username || shortAddr(winner)}`;
+    $("#winnerName").textContent = wd?.username || shortAddr(winner);
+
+    // Show on-chain TX link so anyone can verify the AI judgement on the explorer.
+    if (judgeTx) {
+        const link = document.createElement("a");
+        link.id = "judgeTxLink";
+        link.href = `${EXPLORER_URL}tx/${judgeTx}`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = `🔗 Verify AI judgement on Bradbury · ${judgeTx.substring(0, 10)}…${judgeTx.substring(judgeTx.length - 6)}`;
+        link.style.cssText = "display:inline-block;margin:0.5rem auto 0.75rem;padding:0.4rem 0.85rem;border:1px solid var(--purple);border-radius:8px;color:var(--purple);font-size:0.72rem;font-weight:700;text-decoration:none;letter-spacing:0.04em;";
+        $("#winnerName").after(link);
+    }
 
     let html = "";
     for (const [addr, res] of Object.entries(results)) {
         const claimText  = res.text || claims?.[addr]?.text || "—";
         const declared   = res.was_lie ? "🤥 Declared: LIE" : "✓ Declared: TRUTH";
 
-        // AI verdict badge
+        // AI verdict badge (honest about source: real AI vs declaration fallback)
         let aiBadge = "";
-        if (res.verdict === true)  aiBadge = `<div style="font-size:0.65rem;color:#4ade80;margin-top:3px;font-weight:700;">🤖 AI FACT-CHECK: TRUE ✅</div>`;
-        if (res.verdict === false) aiBadge = `<div style="font-size:0.65rem;color:#f97316;margin-top:3px;font-weight:700;">🤖 AI FACT-CHECK: FALSE 🚨</div>`;
+        const verdictPrefix = res.ai_verified ? "🤖 AI FACT-CHECK" : "⚖️ DECLARATION TRUSTED";
+        if (res.verdict === true)  aiBadge = `<div style="font-size:0.65rem;color:#4ade80;margin-top:3px;font-weight:700;">${verdictPrefix}: TRUE ✅</div>`;
+        if (res.verdict === false) aiBadge = `<div style="font-size:0.65rem;color:#f97316;margin-top:3px;font-weight:700;">${verdictPrefix}: FALSE 🚨</div>`;
 
         // Points explanation
         let why = "";
@@ -1082,8 +1388,10 @@ function showResults(results, winner, claims) {
                 </span>
                 <div style="font-size:0.6rem;color:var(--text-dim);margin-top:4px;">${why}</div>
             </td>
-            <td class="${res.points>=0?"points-positive":"points-negative"}" style="font-size:1.1rem;font-weight:800;">
-                ${res.points>0?"+":""}${res.points}
+            <td>
+                <span class="${res.points>=0?"points-positive":"points-negative"}">
+                    ${res.points>0?"+":""}${res.points}
+                </span>
             </td>
         </tr>`;
     }
@@ -1157,9 +1465,16 @@ function showPhase(phase) {
     ["roomLobby","claimSection","votingSection","judgingSection","waitingSection"]
         .forEach(s => { const el = $(`#${s}`); if(el) el.style.display = s === active ? "block" : "none"; });
 
+    const phaseOrder = ["LOBBY", "CLAIMING", "VOTING", "JUDGING", "RESULTS"];
+    const currentIdx = phaseOrder.indexOf(phase);
     $$(".phase-step").forEach(s => {
-        s.classList.remove("active","completed");
-        if (s.dataset.phase === phase) s.classList.add("active");
+        s.classList.remove("active", "completed");
+        const stepIdx = phaseOrder.indexOf(s.dataset.phase);
+        if (s.dataset.phase === phase) {
+            s.classList.add("active");
+        } else if (stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx) {
+            s.classList.add("completed");
+        }
     });
     refreshIcons();
 }
@@ -1173,10 +1488,20 @@ function setupEventListeners() {
     const modal = $("#createRoomModal");
     $("#createRoomBtn").addEventListener("click", () => {
         modal.classList.add("visible");
-        modal.style.display = "flex";
     });
     $("#cancelCreateBtn").addEventListener("click", closeModal);
     $("#confirmCreateBtn").onclick = createRoom;
+
+    // ── Profile ──
+    $("#profileBtn").onclick = openProfileModal;
+    $("#cancelProfileBtn").onclick = closeProfileModal;
+    $("#saveProfileBtn").onclick = saveMyProfile;
+    $("#avatarPicker").addEventListener("click", (e) => {
+        const btn = e.target.closest(".avatar-option");
+        if (!btn) return;
+        $$(".avatar-option").forEach(b => b.classList.remove("selected"));
+        btn.classList.add("selected");
+    });
 
     $("#startGameBtn").onclick   = startGame;
     $("#submitClaimBtn").onclick = submitClaim;
@@ -1286,31 +1611,51 @@ document.addEventListener("DOMContentLoaded", () => {
 // ══════════════════════════════════════════════════════
 //  LEADERBOARD
 // ══════════════════════════════════════════════════════
+let _leaderboardEntries = [];
+
+function renderLeaderboard() {
+    const lb = $("#leaderboard");
+    if (!lb) return;
+    if (_leaderboardEntries.length === 0) {
+        lb.innerHTML = `
+            <li class="lb-empty">
+                <div class="lb-empty-icon">♛</div>
+                <div class="lb-empty-text">No verdicts yet. Be the first liar.</div>
+            </li>`;
+        return;
+    }
+    const tags = ["Master Perjurer", "Silver Tongue", "Convincing", "Apprentice", "Initiate"];
+    let html = "";
+    _leaderboardEntries.forEach((e, i) => {
+        const rankClass = i < 3 ? `rank-${i+1}` : "";
+        const tag = tags[i] || "Initiate";
+        const avatar = profileAvatar(e.addr, "🎭");
+        const name   = profileName(e.addr) !== shortAddr(e.addr) ? profileName(e.addr) : e.name;
+        html += `<li class="lb-entry" data-player-addr="${e.addr}" style="cursor:pointer">
+            <span class="lb-rank ${rankClass}">${i+1}</span>
+            <span class="lb-avatar" style="font-size:18px;line-height:1">${avatar}</span>
+            <div class="lb-info"><span class="lb-name">${name}</span><span class="lb-tag">${tag}</span></div>
+            <span class="lb-score">${e.score}</span>
+        </li>`;
+    });
+    lb.innerHTML = html;
+    lb.querySelectorAll("[data-player-addr]").forEach(li => {
+        li.onclick = (e) => {
+            e.stopPropagation();
+            showProfilePopover(li.dataset.playerAddr, li);
+        };
+    });
+}
+
+function loadLeaderboardOnce() { renderLeaderboard(); }
+
 function loadLeaderboard() {
     db.ref("leaderboard").orderByChild("score").limitToLast(5).on("value", snap => {
         const data = snap.val() || {};
-        const lb = $("#leaderboard");
-        if (!lb) return;
-
-        const entries = Object.entries(data)
+        _leaderboardEntries = Object.entries(data)
             .map(([addr, d]) => ({ addr, score: d.score || 0, wins: d.wins || 0, name: d.name || shortAddr(addr) }))
             .sort((a, b) => b.score - a.score);
-
-        if (entries.length === 0) {
-            lb.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;text-align:center;padding:1rem;">No scores yet. Play a game!</div>';
-            return;
-        }
-
-        let html = "";
-        entries.forEach((e, i) => {
-            const rankClass = i < 3 ? `rank-${i+1}` : "";
-            html += `<div class="lb-entry">
-                <div class="lb-rank ${rankClass}">${i+1}</div>
-                <div class="lb-name">${e.name}</div>
-                <div class="lb-score">${e.score} pts · ${e.wins}W</div>
-            </div>`;
-        });
-        lb.innerHTML = html;
+        renderLeaderboard();
     });
 }
 

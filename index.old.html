@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liar's Court — GenLayer Mini-Game</title>
+    <meta name="description" content="A multiplayer AI-powered fact-checking game built on GenLayer blockchain. Create rooms, invite friends, and let the AI Judge decide!">
+    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <!-- ═══════ AMBIENT BACKGROUND LAYERS ═══════ -->
+    <div class="bg-aurora" aria-hidden="true">
+        <span class="aurora-orb orb-1"></span>
+        <span class="aurora-orb orb-2"></span>
+        <span class="aurora-orb orb-3"></span>
+    </div>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-grain" aria-hidden="true"></div>
+
+    <canvas id="confettiCanvas"></canvas>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ═══════ HEADER ═══════ -->
+    <header class="header" id="header">
+        <div class="logo">
+            <div class="logo-icon"><i data-lucide="scale" style="width:22px;height:22px;color:#0c0a1a;"></i></div>
+            <div class="logo-text">
+                <h1>LIAR'S COURT</h1>
+                <p>Powered by GenLayer</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="network-badge">
+                <span class="network-dot"></span>
+                <i data-lucide="radio" style="width:12px;height:12px;"></i>
+                Bradbury Testnet
+            </div>
+            <button class="wallet-btn" id="connectWalletBtn"><i data-lucide="wallet" style="width:14px;height:14px;display:inline;vertical-align:middle;margin-right:6px;"></i>CONNECT WALLET</button>
+        </div>
+    </header>
+
+    <!-- ═══════ MAIN APP ═══════ -->
+    <div class="app">
+
+        <!-- ═══════ SIDEBAR ═══════ -->
+        <aside class="sidebar">
+            <!-- Rooms -->
+            <div class="card">
+                <div class="card-title"><i data-lucide="columns-3" style="width:14px;height:14px;"></i> Active Courts</div>
+                <ul class="room-list" id="roomList">
+                    <!-- Rooms injected via JS -->
+                </ul>
+                <button class="create-room-btn" id="createRoomBtn"><i data-lucide="plus-circle" style="width:14px;height:14px;display:inline;vertical-align:middle;margin-right:4px;"></i> Create New Court</button>
+                
+                <!-- Join by Code -->
+                <div class="join-section">
+                    <input class="join-input" id="joinCodeInput" type="text" placeholder="Enter room code..." maxlength="6">
+                    <button class="join-btn" id="joinByCodeBtn">JOIN</button>
+                </div>
+            </div>
+
+            <!-- Leaderboard -->
+            <div class="card">
+                <div class="card-title"><i data-lucide="crown" style="width:14px;height:14px;"></i> Top Liars</div>
+                <div id="leaderboard">
+                    <!-- Leaderboard entries injected via JS -->
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+                <div class="card-title"><i data-lucide="activity" style="width:14px;height:14px;"></i> Activity</div>
+                <div class="activity-log" id="activityLog">
+                    <!-- Log entries injected via JS -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- ═══════ GAME AREA ═══════ -->
+        <main class="game-area" id="gameArea">
+
+            <!-- PHASE: WELCOME (Not in a room) -->
+            <section class="welcome-section animate-in" id="welcomeSection">
+                <div class="welcome-hero">
+                    <div class="welcome-icon-wrap">
+                        <i data-lucide="scale" class="welcome-icon-svg"></i>
+                    </div>
+                    <h1 class="welcome-title">Welcome to <span>Liar's Court</span></h1>
+                    <p class="welcome-desc">Join an active court or create a new one to test your deception skills against the <strong>GenLayer AI Judge</strong>. Are you a truth-teller or a master liar?</p>
+                    <div class="welcome-badges">
+                        <div class="welcome-badge"><i data-lucide="brain" style="width:14px;height:14px;"></i> AI-Powered Verdicts</div>
+                        <div class="welcome-badge"><i data-lucide="shield-check" style="width:14px;height:14px;"></i> On-Chain Consensus</div>
+                        <div class="welcome-badge"><i data-lucide="users" style="width:14px;height:14px;"></i> Multiplayer</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Phase Progress -->
+            <div class="phase-bar" id="phaseBar" style="display:none;">
+                <div class="phase-step" data-phase="LOBBY"><i data-lucide="door-open" style="width:14px;height:14px;"></i> Lobby</div>
+                <div class="phase-step" data-phase="CLAIMING"><i data-lucide="pen-line" style="width:14px;height:14px;"></i> Claim</div>
+                <div class="phase-step" data-phase="VOTING"><i data-lucide="vote" style="width:14px;height:14px;"></i> Vote</div>
+                <div class="phase-step" data-phase="JUDGING"><i data-lucide="brain-circuit" style="width:14px;height:14px;"></i> AI Judge</div>
+                <div class="phase-step" data-phase="RESULTS"><i data-lucide="trophy" style="width:14px;height:14px;"></i> Results</div>
+            </div>
+
+            <!-- Theme -->
+            <div class="theme-banner" id="themeBanner" style="display:none;">
+                <div class="theme-icon">🌍</div>
+                <div>
+                    <div class="theme-label">This Round's Theme</div>
+                    <div class="theme-name" id="themeName">Geography & Countries</div>
+                </div>
+            </div>
+
+            <!-- PHASE: ROOM LOBBY (Players waiting) -->
+            <section class="room-lobby animate-in" id="roomLobby" style="display:none;">
+                <div class="room-header">
+                    <div class="room-header-left">
+                        <h2 id="lobbyRoomName">Waiting for Court...</h2>
+                        <div class="room-code">
+                            Code: <strong id="lobbyRoomCode">------</strong>
+                            <button class="copy-btn" id="copyCodeBtn">📋 Copy</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:0.8rem;align-items:center;">
+                        <button class="leave-btn" id="leaveRoomBtn" style="background:transparent;border:1px solid var(--crimson);color:var(--crimson);border-radius:6px;cursor:pointer;padding:0.6rem 1rem;font-size:0.9rem;font-weight:700;transition:all 0.2s;">LEAVE</button>
+                        <button class="start-game-btn" id="startGameBtn" disabled>START GAME</button>
+                    </div>
+                </div>
+                <div class="players-grid" id="playersGrid">
+                    <!-- Player slots injected via JS -->
+                </div>
+            </section>
+
+            <!-- PHASE: CLAIMING -->
+            <section class="input-area animate-in" id="claimSection" style="display:none;">
+                <h3>Make Your Statement</h3>
+                <p>Write a fun fact or a clever lie about the theme. Can you outsmart the GenLayer AI Judge? 😎</p>
+                <textarea class="claim-input" id="claimInput" placeholder="e.g. The Sahara Desert was once a lush green forest with rivers and lakes..."></textarea>
+                <div class="input-actions">
+                    <label class="lie-toggle">
+                        <input type="checkbox" id="isLieToggle">
+                        <span class="toggle-track"></span>
+                        <span class="toggle-label" id="toggleLabel">This is TRUE ✓</span>
+                    </label>
+                    <button class="submit-claim-btn" id="submitClaimBtn">SUBMIT TO AI JUDGE</button>
+                </div>
+                <div class="countdown-bar" id="claimCountdown"><div class="countdown-fill"></div></div>
+                <div class="countdown-text" id="claimCountdownText"></div>
+            </section>
+
+            <!-- PHASE: VOTING -->
+            <section id="votingSection" style="display:none;" class="animate-in">
+                <div class="claims-grid" id="claimsGrid">
+                    <!-- Claim cards injected via JS -->
+                </div>
+                <button class="submit-claim-btn" id="submitVotesBtn" style="margin-top:1.5rem;">SUBMIT VERDICT</button>
+                <div class="countdown-bar" id="voteCountdown"><div class="countdown-fill"></div></div>
+                <div class="countdown-text" id="voteCountdownText"></div>
+            </section>
+
+            <!-- PHASE: JUDGING -->
+            <section id="judgingSection" style="display:none;" class="animate-in">
+                <div class="card" style="text-align:center; padding: 4rem; border-color:var(--gold); box-shadow:0 0 50px var(--gold-glow);">
+                    <div class="spinner"></div>
+                    <p class="waiting-text" id="judgingLoadingText" style="color:var(--gold); font-size:1.3rem;">GenLayer Validators are thinking... 🧠</p>
+                    <p class="waiting-text" style="margin-top:0.8rem; font-size:0.9rem; color:var(--text-muted);">Reaching LLM Consensus via Equivalence Principle (this may take up to 45s! ⏳)</p>
+                </div>
+            </section>
+
+            <!-- PHASE: WAITING FOR PLAYERS -->
+            <section id="waitingSection" style="display:none;">
+                <div class="card" style="text-align:center; padding: 3rem;">
+                    <div class="spinner"></div>
+                    <p class="waiting-text" id="waitingText">Waiting for other players to submit...</p>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ═══════ RESULTS MODAL ═══════ -->
+    <div class="results-overlay" id="resultsOverlay">
+        <div class="results-modal">
+            <h2><i data-lucide="scale" style="width:22px;height:22px;"></i> COURT ADJOURNED</h2>
+            <p style="color: var(--text-muted);">The AI Judge has spoken.</p>
+            <div class="winner-name" id="winnerName">🏆 Player Name</div>
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">Player</th>
+                        <th style="width: 45%;">Claim Details</th>
+                        <th style="width: 15%;">Verdict</th>
+                        <th style="width: 15%;">Points</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+            </table>
+            <button class="submit-claim-btn" style="margin-top:1.5rem;" id="playAgainBtn">PLAY AGAIN</button>
+        </div>
+    </div>
+
+    <!-- ═══════ CREATE ROOM MODAL ═══════ -->
+    <div class="modal-overlay" id="createRoomModal">
+        <div class="modal">
+            <h2><i data-lucide="gavel" style="width:20px;height:20px;"></i> Open New Court</h2>
+            <div class="modal-field">
+                <label>Room Name</label>
+                <input class="modal-input" id="newRoomName" type="text" placeholder="e.g. Bradbury Arena" maxlength="25">
+            </div>
+            <div class="modal-field">
+                <label>Choose Theme</label>
+                <div class="theme-options" id="themeOptions">
+                    <div class="theme-option selected" data-theme="Geography">
+                        <span class="theme-emoji">🌍</span> Geography
+                    </div>
+                    <div class="theme-option" data-theme="History">
+                        <span class="theme-emoji">📜</span> History
+                    </div>
+                    <div class="theme-option" data-theme="Science">
+                        <span class="theme-emoji">🔬</span> Science
+                    </div>
+                    <div class="theme-option" data-theme="Sports">
+                        <span class="theme-emoji">⚽</span> Sports
+                    </div>
+                    <div class="theme-option" data-theme="Technology">
+                        <span class="theme-emoji">💻</span> Tech
+                    </div>
+                    <div class="theme-option" data-theme="Random">
+                        <span class="theme-emoji">🎲</span> Random
+                    </div>
+                </div>
+            </div>
+            <div class="modal-field">
+                <label>Max Players</label>
+                <select class="modal-select" id="maxPlayersSelect">
+                    <option value="2">2 Players</option>
+                    <option value="3">3 Players</option>
+                    <option value="4" selected>4 Players</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" id="cancelCreateBtn">Cancel</button>
+                <button class="btn-create" id="confirmCreateBtn">🏛️ Open Court</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+    <script src="genlayer-bridge.bundle.js"></script>
+    <script src="app.js?v=1743598010"></script>
+    <script>if(window.lucide)lucide.createIcons();</script>
+</body>
+</html>

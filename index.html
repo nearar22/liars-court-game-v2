@@ -1,252 +1,493 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Liar's Court — GenLayer Mini-Game</title>
-    <meta name="description" content="A multiplayer AI-powered fact-checking game built on GenLayer blockchain. Create rooms, invite friends, and let the AI Judge decide!">
-    <link rel="stylesheet" href="style.css?v=3">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/lucide@latest"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Liar's Court — Powered by GenLayer</title>
+  <meta name="description" content="A premium multiplayer courtroom where an AI Judge delivers verdicts on the Bradbury testnet." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css?v=30" />
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
-    <canvas id="confettiCanvas"></canvas>
-    <div class="toast-container" id="toastContainer"></div>
 
-    <!-- ═══════ HEADER ═══════ -->
-    <header class="header" id="header">
-        <div class="logo">
-            <div class="logo-icon"><i data-lucide="scale" style="width:22px;height:22px;color:#0c0a1a;"></i></div>
-            <div class="logo-text">
-                <h1>LIAR'S COURT</h1>
-                <p>Powered by GenLayer</p>
-            </div>
-        </div>
-        <div class="header-right">
-            <div class="network-badge">
-                <span class="network-dot"></span>
-                <i data-lucide="radio" style="width:12px;height:12px;"></i>
-                Bradbury Testnet
-            </div>
-            <button class="wallet-btn" id="connectWalletBtn"><i data-lucide="wallet" style="width:14px;height:14px;display:inline;vertical-align:middle;margin-right:6px;"></i>CONNECT WALLET</button>
-        </div>
-    </header>
+  <!-- Ambient layers -->
+  <div class="ambient" aria-hidden="true">
+    <div class="aurora aurora-violet"></div>
+    <div class="aurora aurora-cyan"></div>
+    <div class="aurora aurora-gold"></div>
+    <div class="grid-overlay"></div>
+    <div class="grain"></div>
+  </div>
 
-    <!-- ═══════ MAIN APP ═══════ -->
-    <div class="app">
-
-        <!-- ═══════ SIDEBAR ═══════ -->
-        <aside class="sidebar">
-            <!-- Rooms -->
-            <div class="card">
-                <div class="card-title"><i data-lucide="columns-3" style="width:14px;height:14px;"></i> Active Courts</div>
-                <ul class="room-list" id="roomList">
-                    <!-- Rooms injected via JS -->
-                </ul>
-                <button class="create-room-btn" id="createRoomBtn"><i data-lucide="plus-circle" style="width:14px;height:14px;display:inline;vertical-align:middle;margin-right:4px;"></i> Create New Court</button>
-                
-                <!-- Join by Code -->
-                <div class="join-section">
-                    <input class="join-input" id="joinCodeInput" type="text" placeholder="Enter room code..." maxlength="6">
-                    <button class="join-btn" id="joinByCodeBtn">JOIN</button>
-                </div>
-            </div>
-
-            <!-- Leaderboard -->
-            <div class="card">
-                <div class="card-title"><i data-lucide="crown" style="width:14px;height:14px;"></i> Top Liars</div>
-                <div id="leaderboard">
-                    <!-- Leaderboard entries injected via JS -->
-                </div>
-            </div>
-
-            <!-- Activity Log -->
-            <div class="card">
-                <div class="card-title"><i data-lucide="activity" style="width:14px;height:14px;"></i> Activity</div>
-                <div class="activity-log" id="activityLog">
-                    <!-- Log entries injected via JS -->
-                </div>
-            </div>
-        </aside>
-
-        <!-- ═══════ GAME AREA ═══════ -->
-        <main class="game-area" id="gameArea">
-
-            <!-- PHASE: WELCOME (Not in a room) -->
-            <section class="welcome-section animate-in" id="welcomeSection">
-                <div class="welcome-hero">
-                    <div class="welcome-icon-wrap">
-                        <i data-lucide="scale" class="welcome-icon-svg"></i>
-                    </div>
-                    <h1 class="welcome-title">Welcome to <span>Liar's Court</span></h1>
-                    <p class="welcome-desc">Join an active court or create a new one to test your deception skills against the <strong>GenLayer AI Judge</strong>. Are you a truth-teller or a master liar?</p>
-                    <div class="welcome-badges">
-                        <div class="welcome-badge"><i data-lucide="brain" style="width:14px;height:14px;"></i> AI-Powered Verdicts</div>
-                        <div class="welcome-badge"><i data-lucide="shield-check" style="width:14px;height:14px;"></i> On-Chain Consensus</div>
-                        <div class="welcome-badge"><i data-lucide="users" style="width:14px;height:14px;"></i> Multiplayer</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Phase Progress -->
-            <div class="phase-bar" id="phaseBar" style="display:none;">
-                <div class="phase-step" data-phase="LOBBY"><i data-lucide="door-open" style="width:14px;height:14px;"></i> Lobby</div>
-                <div class="phase-step" data-phase="CLAIMING"><i data-lucide="pen-line" style="width:14px;height:14px;"></i> Claim</div>
-                <div class="phase-step" data-phase="VOTING"><i data-lucide="vote" style="width:14px;height:14px;"></i> Vote</div>
-                <div class="phase-step" data-phase="JUDGING"><i data-lucide="brain-circuit" style="width:14px;height:14px;"></i> AI Judge</div>
-                <div class="phase-step" data-phase="RESULTS"><i data-lucide="trophy" style="width:14px;height:14px;"></i> Results</div>
-            </div>
-
-            <!-- Theme -->
-            <div class="theme-banner" id="themeBanner" style="display:none;">
-                <div class="theme-icon">🌍</div>
-                <div>
-                    <div class="theme-label">This Round's Theme</div>
-                    <div class="theme-name" id="themeName">Geography & Countries</div>
-                </div>
-            </div>
-
-            <!-- PHASE: ROOM LOBBY (Players waiting) -->
-            <section class="room-lobby animate-in" id="roomLobby" style="display:none;">
-                <div class="room-header">
-                    <div class="room-header-left">
-                        <h2 id="lobbyRoomName">Waiting for Court...</h2>
-                        <div class="room-code">
-                            Code: <strong id="lobbyRoomCode">------</strong>
-                            <button class="copy-btn" id="copyCodeBtn">📋 Copy</button>
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:0.8rem;align-items:center;">
-                        <button class="leave-btn" id="leaveRoomBtn" style="background:transparent;border:1px solid var(--crimson);color:var(--crimson);border-radius:6px;cursor:pointer;padding:0.6rem 1rem;font-size:0.9rem;font-weight:700;transition:all 0.2s;">LEAVE</button>
-                        <button class="start-game-btn" id="startGameBtn" disabled>START GAME</button>
-                    </div>
-                </div>
-                <div class="players-grid" id="playersGrid">
-                    <!-- Player slots injected via JS -->
-                </div>
-            </section>
-
-            <!-- PHASE: CLAIMING -->
-            <section class="input-area animate-in" id="claimSection" style="display:none;">
-                <h3>Make Your Statement</h3>
-                <p>Write a fun fact or a clever lie about the theme. Can you outsmart the GenLayer AI Judge? 😎</p>
-                <textarea class="claim-input" id="claimInput" placeholder="e.g. The Sahara Desert was once a lush green forest with rivers and lakes..."></textarea>
-                <div class="input-actions">
-                    <label class="lie-toggle">
-                        <input type="checkbox" id="isLieToggle">
-                        <span class="toggle-track"></span>
-                        <span class="toggle-label" id="toggleLabel">This is TRUE ✓</span>
-                    </label>
-                    <button class="submit-claim-btn" id="submitClaimBtn">SUBMIT TO AI JUDGE</button>
-                </div>
-                <div class="countdown-bar" id="claimCountdown"><div class="countdown-fill"></div></div>
-                <div class="countdown-text" id="claimCountdownText"></div>
-            </section>
-
-            <!-- PHASE: VOTING -->
-            <section id="votingSection" style="display:none;" class="animate-in">
-                <div class="claims-grid" id="claimsGrid">
-                    <!-- Claim cards injected via JS -->
-                </div>
-                <button class="submit-claim-btn" id="submitVotesBtn" style="margin-top:1.5rem;">SUBMIT VERDICT</button>
-                <div class="countdown-bar" id="voteCountdown"><div class="countdown-fill"></div></div>
-                <div class="countdown-text" id="voteCountdownText"></div>
-            </section>
-
-            <!-- PHASE: JUDGING -->
-            <section id="judgingSection" style="display:none;" class="animate-in">
-                <div class="card" style="text-align:center; padding: 4rem; border-color:var(--gold); box-shadow:0 0 50px var(--gold-glow);">
-                    <div class="spinner"></div>
-                    <p class="waiting-text" id="judgingLoadingText" style="color:var(--gold); font-size:1.3rem;">GenLayer Validators are thinking... 🧠</p>
-                    <p class="waiting-text" style="margin-top:0.8rem; font-size:0.9rem; color:var(--text-muted);">Reaching LLM Consensus via Equivalence Principle (this may take up to 45s! ⏳)</p>
-                </div>
-            </section>
-
-            <!-- PHASE: WAITING FOR PLAYERS -->
-            <section id="waitingSection" style="display:none;">
-                <div class="card" style="text-align:center; padding: 3rem;">
-                    <div class="spinner"></div>
-                    <p class="waiting-text" id="waitingText">Waiting for other players to submit...</p>
-                </div>
-            </section>
-
-        </main>
+  <!-- ============ HEADER ============ -->
+  <header id="header" class="header">
+    <div class="logo">
+      <span class="logo-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+          <defs>
+            <linearGradient id="lg-gold" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="hsl(38, 90%, 78%)"/>
+              <stop offset="100%" stop-color="hsl(39, 60%, 48%)"/>
+            </linearGradient>
+          </defs>
+          <path d="M12 3v18M5 21h14M9 5h6M4 7h16" stroke="url(#lg-gold)" stroke-width="1.3" stroke-linecap="round"/>
+          <path d="M4 7l-3 6a3 3 0 006 0L4 7zM20 7l-3 6a3 3 0 006 0L20 7z" stroke="url(#lg-gold)" stroke-width="1.2" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="logo-text">
+        <span><i>Liar's</i> Court</span>
+        <small>Powered by GenLayer</small>
+      </span>
     </div>
 
-    <!-- ═══════ RESULTS MODAL ═══════ -->
-    <div class="results-overlay" id="resultsOverlay">
-        <div class="results-modal">
-            <h2><i data-lucide="scale" style="width:22px;height:22px;"></i> COURT ADJOURNED</h2>
-            <p style="color: var(--text-muted);">The AI Judge has spoken.</p>
-            <div class="winner-name" id="winnerName">🏆 Player Name</div>
-            <table class="results-table" id="resultsTable">
-                <thead>
-                    <tr>
-                        <th style="width: 25%;">Player</th>
-                        <th style="width: 45%;">Claim Details</th>
-                        <th style="width: 15%;">Verdict</th>
-                        <th style="width: 15%;">Points</th>
-                    </tr>
-                </thead>
-                <tbody id="resultsBody"></tbody>
-            </table>
-            <button class="submit-claim-btn" style="margin-top:1.5rem;" id="playAgainBtn">PLAY AGAIN</button>
-        </div>
+    <div class="header-right">
+      <span class="network-badge">
+        <span class="network-dot"></span>
+        Bradbury Testnet
+      </span>
+      <button id="connectWalletBtn" class="wallet-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+        <span>Connect Wallet</span>
+      </button>
+      <button id="profileBtn" class="profile-btn" type="button" hidden title="Edit Profile">
+        <span id="profileBtnAvatar" class="profile-btn-avatar">🎭</span>
+      </button>
     </div>
+  </header>
 
-    <!-- ═══════ CREATE ROOM MODAL ═══════ -->
-    <div class="modal-overlay" id="createRoomModal">
-        <div class="modal">
-            <h2><i data-lucide="gavel" style="width:20px;height:20px;"></i> Open New Court</h2>
-            <div class="modal-field">
-                <label>Room Name</label>
-                <input class="modal-input" id="newRoomName" type="text" placeholder="e.g. Bradbury Arena" maxlength="25">
+  <!-- ============ APP ============ -->
+  <div class="app">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+
+      <section class="card">
+        <h3 class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 12.5-8 8a2.119 2.119 0 1 1-3-3l8-8"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg>
+          Active Courts
+        </h3>
+        <ul id="roomList" class="room-list"></ul>
+
+        <!-- Hidden controls — proxied by hero CTAs -->
+        <button id="createRoomBtn" type="button" hidden aria-hidden="true"></button>
+        <input id="joinCodeInput" type="text" hidden aria-hidden="true" />
+        <button id="joinByCodeBtn" type="button" hidden aria-hidden="true"></button>
+      </section>
+
+      <section class="card">
+        <h3 class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Z"/><path d="M5 21h14"/></svg>
+          Top Liars
+        </h3>
+        <ul id="leaderboard"></ul>
+      </section>
+
+      <section class="card">
+        <h3 class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Activity Log
+        </h3>
+        <ul id="activityLog" class="activity-log"></ul>
+      </section>
+
+    </aside>
+
+    <!-- ============ MAIN GAME AREA ============ -->
+    <main id="gameArea" class="game-area">
+
+      <!-- WELCOME -->
+      <section id="welcomeSection" class="welcome-section animate-in">
+        <div class="welcome-grid">
+          <div class="welcome-hero">
+            <span class="pill pill-gold welcome-session">
+              <span class="pill-dot"></span>
+              The AI Judge is in session
+            </span>
+
+            <h1 class="welcome-title">Welcome to the<br><i class="iridescent">Liar's Court</i></h1>
+            <p class="welcome-desc">
+              Submit your statement. Convince the chamber. A council of validators
+              deliberates by Equivalence Principle, and consensus delivers the
+              verdict — recorded on the Bradbury testnet.
+            </p>
+
+            <div class="welcome-actions">
+              <button class="btn-royal welcome-cta" type="button" onclick="document.getElementById('createRoomBtn').click()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                Open New Court
+              </button>
+              <button class="btn-ghost-glass welcome-cta" type="button" onclick="(function(){var c=prompt('Enter court code');if(c){var i=document.getElementById('joinCodeInput');i.value=c.trim();document.getElementById('joinByCodeBtn').click();}})()">
+                Join with code
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              </button>
             </div>
-            <div class="modal-field">
-                <label>Choose Theme</label>
-                <div class="theme-options" id="themeOptions">
-                    <div class="theme-option selected" data-theme="Geography">
-                        <span class="theme-emoji">🌍</span> Geography
-                    </div>
-                    <div class="theme-option" data-theme="History">
-                        <span class="theme-emoji">📜</span> History
-                    </div>
-                    <div class="theme-option" data-theme="Science">
-                        <span class="theme-emoji">🔬</span> Science
-                    </div>
-                    <div class="theme-option" data-theme="Sports">
-                        <span class="theme-emoji">⚽</span> Sports
-                    </div>
-                    <div class="theme-option" data-theme="Technology">
-                        <span class="theme-emoji">💻</span> Tech
-                    </div>
-                    <div class="theme-option" data-theme="Random">
-                        <span class="theme-emoji">🎲</span> Random
-                    </div>
-                </div>
+
+            <div class="welcome-badges">
+              <span class="pill pill-violet"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>AI-Powered</span>
+              <span class="pill pill-violet"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>On-Chain</span>
+              <span class="pill pill-violet"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/></svg>Multiplayer</span>
             </div>
-            <div class="modal-field">
-                <label>Max Players</label>
-                <select class="modal-select" id="maxPlayersSelect">
-                    <option value="2">2 Players</option>
-                    <option value="3">3 Players</option>
-                    <option value="4" selected>4 Players</option>
-                </select>
-            </div>
-            <div class="modal-actions">
-                <button class="btn-cancel" id="cancelCreateBtn">Cancel</button>
-                <button class="btn-create" id="confirmCreateBtn">🏛️ Open Court</button>
-            </div>
+          </div>
+
+          <div class="welcome-scale" aria-hidden="true">
+            <div class="scale-glow"></div>
+            <div class="scale-ring scale-ring-outer"></div>
+            <div class="scale-ring scale-ring-inner"></div>
+            <svg class="scale-glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="sg-gold" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="hsl(38, 90%, 78%)"/>
+                  <stop offset="100%" stop-color="hsl(39, 60%, 48%)"/>
+                </linearGradient>
+              </defs>
+              <path d="M12 3v18M5 21h14M9 5h6" stroke="url(#sg-gold)" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M4 7h16" stroke="url(#sg-gold)" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M4 7l-3 6a3 3 0 006 0L4 7zM20 7l-3 6a3 3 0 006 0L20 7z" stroke="url(#sg-gold)" stroke-width="1.1" stroke-linejoin="round"/>
+            </svg>
+          </div>
         </div>
+      </section>
+
+      <!-- PHASE BAR -->
+      <div id="phaseBar" class="phase-bar" style="display:none">
+        <div class="phase-step active" data-step="1"><span class="phase-num">01</span><span>Lobby</span></div>
+        <div class="phase-step" data-step="2"><span class="phase-num">02</span><span>Claiming</span></div>
+        <div class="phase-step" data-step="3"><span class="phase-num">03</span><span>Voting</span></div>
+        <div class="phase-step" data-step="4"><span class="phase-num">04</span><span>Judging</span></div>
+        <div class="phase-step" data-step="5"><span class="phase-num">05</span><span>Verdict</span></div>
+      </div>
+
+      <!-- THEME BANNER -->
+      <div id="themeBanner" class="theme-banner" style="display:none">
+        <span class="theme-icon">🌍</span>
+        <div>
+          <div class="theme-label">Theme of this round</div>
+          <div id="themeName" class="theme-name">Geography</div>
+        </div>
+      </div>
+
+      <!-- ROOM LOBBY -->
+      <section id="roomLobby" class="room-lobby" style="display:none">
+        <header class="room-header">
+          <div class="room-header-left">
+            <div class="theme-label">Court</div>
+            <h2 id="lobbyRoomName"><i>The Velvet Chamber</i></h2>
+            <div class="room-code">
+              <span id="lobbyRoomCode">VELVET-21</span>
+              <button id="copyCodeBtn" class="copy-btn" type="button" title="Copy code">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              </button>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button id="leaveRoomBtn" class="leave-btn" type="button">Leave</button>
+            <button id="startGameBtn" class="start-game-btn" type="button">Begin Session</button>
+          </div>
+        </header>
+
+        <div id="playersGrid" class="players-grid">
+          <div class="player-slot occupied ready you">
+            <div class="player-avatar">🦊</div>
+            <div class="player-name">Vesper.eth</div>
+            <div class="player-status"><span class="status-dot"></span>Ready</div>
+            <span class="player-badge-you">You</span>
+          </div>
+          <div class="player-slot occupied ready">
+            <div class="player-avatar">🦉</div>
+            <div class="player-name">0x8de…29dc</div>
+            <div class="player-status"><span class="status-dot"></span>Ready</div>
+          </div>
+          <div class="player-slot occupied thinking">
+            <div class="player-avatar">🐉</div>
+            <div class="player-name">0xA1…f4b2</div>
+            <div class="player-status"><span class="status-dot"></span>Thinking</div>
+          </div>
+          <div class="player-slot empty">
+            <div class="player-avatar">✦</div>
+            <div class="player-name">Empty seat</div>
+            <div class="player-status">Awaiting</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLAIM -->
+      <section id="claimSection" class="input-area" style="display:none">
+        <header class="section-head">
+          <div>
+            <div class="theme-label">Compose your statement</div>
+            <h3>State your claim before the court</h3>
+          </div>
+          <span class="round-pill">Round 03</span>
+        </header>
+
+        <textarea id="claimInput" class="claim-input" rows="4" placeholder="State your claim before the court…"></textarea>
+
+        <div class="input-actions">
+          <label class="lie-toggle" for="isLieToggle">
+            <input type="checkbox" id="isLieToggle" hidden />
+            <span class="toggle-track" aria-hidden="true">
+              <span class="toggle-knob"></span>
+              <span class="toggle-side toggle-truth">Truth</span>
+              <span class="toggle-side toggle-lie">Lie</span>
+            </span>
+            <span id="toggleLabel" class="toggle-label">Submitting as · Truth</span>
+          </label>
+
+          <div id="claimCountdown" class="countdown-bar">
+            <div class="countdown-fill"></div>
+            <span id="claimCountdownText" class="countdown-text">0:42</span>
+          </div>
+
+          <button id="submitClaimBtn" class="submit-claim-btn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            Submit to AI Judge
+          </button>
+        </div>
+      </section>
+
+      <!-- VOTING -->
+      <section id="votingSection" class="voting-section" style="display:none">
+        <header class="section-head">
+          <div>
+            <div class="theme-label">The chamber deliberates</div>
+            <h3>Cast your vote on each statement</h3>
+          </div>
+          <div id="voteCountdown" class="countdown-bar">
+            <div class="countdown-fill"></div>
+            <span id="voteCountdownText" class="countdown-text">0:58</span>
+          </div>
+        </header>
+
+        <div id="claimsGrid" class="claims-grid">
+          <article class="claim-card">
+            <div class="claim-author"><span class="player-avatar small">🦊</span>Vesper.eth · Statement #1</div>
+            <p class="claim-text">Mount Kosciuszko is the highest peak in mainland Australia.</p>
+            <div class="vote-buttons">
+              <button class="vote-btn truth" type="button">✓ Truth</button>
+              <button class="vote-btn lie" type="button">✕ Lie</button>
+            </div>
+          </article>
+          <article class="claim-card">
+            <div class="claim-author"><span class="player-avatar small">🦉</span>0x8de…29dc · Statement #2</div>
+            <p class="claim-text">The Nile flows north through eleven African countries before reaching the Mediterranean.</p>
+            <div class="vote-buttons">
+              <button class="vote-btn truth" type="button">✓ Truth</button>
+              <button class="vote-btn lie" type="button">✕ Lie</button>
+            </div>
+          </article>
+          <article class="claim-card">
+            <div class="claim-author"><span class="player-avatar small">🐉</span>0xA1…f4b2 · Statement #3</div>
+            <p class="claim-text">Lake Baikal contains roughly 20% of the planet's unfrozen freshwater.</p>
+            <div class="vote-buttons">
+              <button class="vote-btn truth" type="button">✓ Truth</button>
+              <button class="vote-btn lie" type="button">✕ Lie</button>
+            </div>
+          </article>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:18px">
+          <button id="submitVotesBtn" class="submit-claim-btn" type="button">Submit Verdict</button>
+        </div>
+      </section>
+
+      <!-- JUDGING -->
+      <section id="judgingSection" class="judging-section" style="display:none">
+        <div class="judging-orb">
+          <div class="orb-ring"></div>
+          <div class="orb-ring orb-ring-2"></div>
+          <div class="orb-core"></div>
+        </div>
+        <div class="theme-label" style="color:var(--gold)">Equivalence Principle Consensus</div>
+        <h2 id="judgingLoadingText">The AI Judge is deliberating…</h2>
+        <p class="judging-sub">Validators reviewing every statement on the Bradbury testnet.</p>
+      </section>
+
+      <!-- WAITING -->
+      <section id="waitingSection" class="waiting-section" style="display:none">
+        <div class="spinner"></div>
+        <p id="waitingText" class="waiting-text">Awaiting the chamber…</p>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ============ RESULTS OVERLAY ============ -->
+  <div id="resultsOverlay" class="results-overlay">
+    <div class="results-modal">
+      <div class="results-ribbon"></div>
+      <div class="results-head">
+        <div class="theme-label" style="color:var(--gold)">Court adjourned</div>
+        <h2>The <i class="iridescent">AI Judge</i> has spoken</h2>
+        <div class="winner-line">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--gold)"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Z"/><path d="M5 21h14"/></svg>
+          <span>Winner: <strong id="winnerName" class="winner-name">Vesper.eth</strong></span>
+          <a class="onchain-link">⛓ Verify · 0x4f1c…9ad2</a>
+        </div>
+      </div>
+
+      <table id="resultsTable" class="results-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th>Statement</th>
+            <th>Verdict</th>
+            <th>Δ Points</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+          <tr>
+            <td><span class="player-avatar small">🦊</span> Vesper.eth</td>
+            <td>Mount Kosciuszko is the highest peak in mainland Australia.</td>
+            <td><span class="verdict verdict-true"><span class="verdict-badge">AI ✓</span> Truth</span></td>
+            <td><span class="points-badge points-positive">+30</span></td>
+          </tr>
+          <tr>
+            <td><span class="player-avatar small">🦉</span> 0x8de…29dc</td>
+            <td>The Nile flows through eleven African countries.</td>
+            <td><span class="verdict verdict-caught"><span class="verdict-badge">AI ✕</span> Caught</span></td>
+            <td><span class="points-badge points-negative">−10</span></td>
+          </tr>
+          <tr>
+            <td><span class="player-avatar small">🐉</span> 0xA1…f4b2</td>
+            <td>Lake Baikal holds 20% of unfrozen freshwater.</td>
+            <td><span class="verdict verdict-false"><span class="verdict-badge">AI ✓</span> Truth</span></td>
+            <td><span class="points-badge points-positive">+15</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="results-actions">
+        <button id="playAgainBtn" class="submit-claim-btn" type="button">Reconvene the Court</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <!-- ============ CREATE ROOM MODAL ============ -->
+  <div id="createRoomModal" class="modal-overlay">
+    <div class="modal">
+      <div class="theme-label" style="color:var(--gold);margin-bottom:6px">New session</div>
+      <h2 style="font-family:var(--font-display);font-style:italic;font-weight:600;margin:0 0 22px">Open a new court</h2>
 
-    <script src="genlayer-bridge.bundle.js"></script>
-    <script src="app.js?v=1743598000"></script>
-    <script>if(window.lucide)lucide.createIcons();</script>
+      <div class="modal-field">
+        <label>Court name</label>
+        <input id="newRoomName" class="modal-input" type="text" placeholder="e.g. The Velvet Chamber" />
+      </div>
+
+      <div class="modal-field">
+        <label>Theme</label>
+        <div id="themeOptions" class="theme-options">
+          <div class="theme-option selected" data-theme="Geography"><span class="theme-emoji">🌍</span><span>Geography</span></div>
+          <div class="theme-option" data-theme="Sports"><span class="theme-emoji">⚽</span><span>Sports</span></div>
+          <div class="theme-option" data-theme="Technology"><span class="theme-emoji">💻</span><span>Technology</span></div>
+          <div class="theme-option" data-theme="History"><span class="theme-emoji">📜</span><span>History</span></div>
+          <div class="theme-option" data-theme="Science"><span class="theme-emoji">🔬</span><span>Science</span></div>
+          <div class="theme-option" data-theme="Random"><span class="theme-emoji">🎲</span><span>Random</span></div>
+        </div>
+      </div>
+
+      <div class="modal-field">
+        <label>Max players</label>
+        <select id="maxPlayersSelect" class="modal-select">
+          <option>3</option><option selected>4</option><option>5</option><option>6</option>
+        </select>
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelCreateBtn" class="btn-cancel" type="button">Cancel</button>
+        <button id="confirmCreateBtn" class="btn-create" type="button">Open Court</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PROFILE MODAL ============ -->
+  <div id="profileModal" class="modal-overlay">
+    <div class="modal profile-modal">
+      <div class="theme-label" style="color:var(--gold);margin-bottom:6px">Identity</div>
+      <h2 style="font-family:var(--font-display);font-style:italic;font-weight:600;margin:0 0 22px">Your liar's mask</h2>
+
+      <div class="modal-field">
+        <label>Choose your avatar</label>
+        <div id="avatarPicker" class="avatar-picker">
+          <button type="button" class="avatar-option selected" data-emoji="🦊">🦊</button>
+          <button type="button" class="avatar-option" data-emoji="🦔">🦔</button>
+          <button type="button" class="avatar-option" data-emoji="🐢">🐢</button>
+          <button type="button" class="avatar-option" data-emoji="🦅">🦅</button>
+          <button type="button" class="avatar-option" data-emoji="🦁">🦁</button>
+          <button type="button" class="avatar-option" data-emoji="🐺">🐺</button>
+          <button type="button" class="avatar-option" data-emoji="🦉">🦉</button>
+          <button type="button" class="avatar-option" data-emoji="🐉">🐉</button>
+          <button type="button" class="avatar-option" data-emoji="🦄">🦄</button>
+          <button type="button" class="avatar-option" data-emoji="🐱">🐱</button>
+          <button type="button" class="avatar-option" data-emoji="🐶">🐶</button>
+          <button type="button" class="avatar-option" data-emoji="🐼">🐼</button>
+          <button type="button" class="avatar-option" data-emoji="🐸">🐸</button>
+          <button type="button" class="avatar-option" data-emoji="🦝">🦝</button>
+          <button type="button" class="avatar-option" data-emoji="🦋">🦋</button>
+          <button type="button" class="avatar-option" data-emoji="🐙">🐙</button>
+          <button type="button" class="avatar-option" data-emoji="🦂">🦂</button>
+          <button type="button" class="avatar-option" data-emoji="🐍">🐍</button>
+          <button type="button" class="avatar-option" data-emoji="🦇">🦇</button>
+          <button type="button" class="avatar-option" data-emoji="👑">👑</button>
+          <button type="button" class="avatar-option" data-emoji="⚖️">⚖️</button>
+          <button type="button" class="avatar-option" data-emoji="🎭">🎭</button>
+          <button type="button" class="avatar-option" data-emoji="🃏">🃏</button>
+          <button type="button" class="avatar-option" data-emoji="💎">💎</button>
+        </div>
+      </div>
+
+      <div class="modal-field">
+        <label>Display name</label>
+        <input id="profileName" class="modal-input" type="text" maxlength="20" placeholder="e.g. Vesper" />
+      </div>
+
+      <div class="modal-field">
+        <label>Bio <span style="color:var(--dim);font-size:10px">(optional, 80 chars)</span></label>
+        <input id="profileBio" class="modal-input" type="text" maxlength="80" placeholder="Master of geographic deception" />
+      </div>
+
+      <div class="modal-field">
+        <label>X (Twitter) handle <span style="color:var(--dim);font-size:10px">(without @)</span></label>
+        <input id="profileX" class="modal-input" type="text" maxlength="15" placeholder="vesper_eth" />
+      </div>
+
+      <div class="modal-field">
+        <label>Discord username <span style="color:var(--dim);font-size:10px">(optional)</span></label>
+        <input id="profileDiscord" class="modal-input" type="text" maxlength="32" placeholder="vesper" />
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelProfileBtn" class="btn-cancel" type="button">Cancel</button>
+        <button id="saveProfileBtn" class="btn-create" type="button">Save Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PROFILE POPOVER ============ -->
+  <div id="profilePopover" class="profile-popover" hidden>
+    <div class="profile-popover-avatar" id="popAvatar">🦊</div>
+    <div class="profile-popover-name" id="popName">Player</div>
+    <div class="profile-popover-addr" id="popAddr">0x...</div>
+    <div class="profile-popover-bio" id="popBio"></div>
+    <div class="profile-popover-socials" id="popSocials"></div>
+  </div>
+
+  <!-- ============ TOAST + CONFETTI ============ -->
+  <div id="toastContainer" class="toast-container"></div>
+  <canvas id="confettiCanvas"></canvas>
+
+  <!-- Required scripts (do not modify) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="genlayer-bridge.bundle.js"></script>
+  <script src="app.js?v=29"></script>
+  <script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>
