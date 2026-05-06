@@ -1,5 +1,23 @@
 node_modules/
 .env
+.env.*
+!.env.example
 .DS_Store
+Thumbs.db
 *.pyc
 __pycache__/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Local backups & test scripts
+*.old.*
+*.bak
+test_*.js
+test_*.mjs
+
+# OS / logs
+*.log
+npm-debug.log*

@@ -102,7 +102,7 @@ function applyMyProfileToUI(p) {
     if (p.avatar) $("#profileBtnAvatar").textContent = p.avatar;
     if (p.displayName) {
         state.playerName = p.displayName;
-        $("#connectWalletBtn").textContent = `⚡ ${p.displayName}`;
+        if (state.connected) setWalletButtonConnected(true);
     }
 }
 
@@ -114,6 +114,26 @@ function getProfile(addr) {
 function profileAvatar(addr, fallback = "🎭") {
     const p = getProfile(addr);
     return p?.avatar || fallback;
+}
+
+// Deterministic gradient avatar (jazzicon-style) when user has no custom emoji.
+// Returns an HTML string safe to inject via innerHTML.
+function avatarHtml(addr, sizeClass = "") {
+    const p = addr ? getProfile(addr) : null;
+    if (p?.avatar) {
+        return `<span class="gen-avatar gen-avatar-emoji ${sizeClass}">${p.avatar}</span>`;
+    }
+    if (!addr) {
+        return `<span class="gen-avatar gen-avatar-empty ${sizeClass}">?</span>`;
+    }
+    // Hash address → two complementary hues
+    let h = 0;
+    for (let i = 0; i < addr.length; i++) h = (h * 31 + addr.charCodeAt(i)) >>> 0;
+    const hue1 = h % 360;
+    const hue2 = (hue1 + 70 + ((h >> 8) % 80)) % 360;
+    const rot  = (h >> 16) % 360;
+    const initials = addr.replace(/^0x/i, "").slice(0, 2).toUpperCase();
+    return `<span class="gen-avatar ${sizeClass}" style="background:linear-gradient(${rot}deg, hsl(${hue1} 75% 58%), hsl(${hue2} 80% 42%))">${initials}</span>`;
 }
 
 function profileName(addr) {
@@ -171,6 +191,29 @@ function showProfilePopover(addr, anchor) {
     $("#popName").textContent   = p.displayName || shortAddr(addr);
     $("#popAddr").textContent   = shortAddr(addr);
     $("#popBio").textContent    = p.bio || "";
+    // Level info
+    const lvl = getLevelInfo(addr);
+    const lvlEl = $("#popLevel");
+    if (lvlEl) {
+        lvlEl.innerHTML = `
+            <div class="pop-lvl-row">
+                <span class="pop-lvl-badge">Lvl ${lvl.level}</span>
+                <span class="pop-lvl-title">${lvl.title}</span>
+            </div>
+            <div class="pop-xp-bar"><div class="pop-xp-fill" style="width:${lvl.progress}%"></div></div>
+            <div class="pop-xp-meta">${lvl.currentLevelXp} / ${lvl.nextLevelXp} XP · ${lvl.totalXp.toLocaleString()} total</div>
+        `;
+    }
+    // Per-theme expertise
+    const themesEl = $("#popThemes");
+    if (themesEl) {
+        const data = levelsCache[addr.toLowerCase()];
+        const byTheme = data?.byTheme || {};
+        const icons = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
+        const themes = Object.entries(byTheme).filter(([,xp]) => xp > 0).sort((a,b) => b[1]-a[1]);
+        themesEl.innerHTML = themes.length === 0 ? "" :
+            themes.map(([t, xp]) => `<span class="pop-theme-pill" title="${xp} XP in ${t}">${icons[t]||"🎲"} ${xp}</span>`).join("");
+    }
     const socials = $("#popSocials");
     socials.innerHTML = "";
     if (p.socials?.x) {
@@ -385,14 +428,53 @@ async function glRPC(method, params = []) {
 // ══════════════════════════════════════════════════════
 //  WALLET (only for identity, no TX signing needed)
 // ══════════════════════════════════════════════════════
+// ── Wallet button helpers ──────────────────────────
+function setWalletButtonConnected(isConnected) {
+    const btn  = $("#connectWalletBtn");
+    const txt  = $("#walletBtnText");
+    const chev = $("#walletBtnChevron");
+    if (!btn) return;
+    if (isConnected) {
+        const p = getProfile(state.playerAddr);
+        const label = p?.displayName || state.playerName || shortAddr(state.playerAddr);
+        if (txt)  txt.textContent = `⚡ ${label}`;
+        if (chev) chev.hidden = false;
+        btn.classList.add("connected");
+    } else {
+        if (txt)  txt.textContent = "Connect Wallet";
+        if (chev) chev.hidden = true;
+        btn.classList.remove("connected");
+    }
+}
+
+function disconnectWallet() {
+    state.playerAddr = "";
+    state.playerName = "";
+    state.connected  = false;
+    setWalletButtonConnected(false);
+    $("#walletMenu").hidden = true;
+    $("#profileBtn").hidden = true;
+    $("#profileBtnAvatar").textContent = "🎭";
+    addLog(`Wallet disconnected.`);
+}
+
+function toggleWalletMenu(force) {
+    const menu = $("#walletMenu");
+    if (!menu) return;
+    const open = force !== undefined ? force : menu.hidden;
+    menu.hidden = !open;
+    if (open) {
+        $("#walletMenuAddr").textContent = state.playerAddr || "";
+    }
+}
+
 async function connectWallet() {
     if (!window.ethereum) return alert("Install MetaMask or Rabby!");
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
     state.playerAddr = accounts[0];
     state.playerName = shortAddr(state.playerAddr);
     state.connected  = true;
-    $("#connectWalletBtn").textContent = `⚡ ${state.playerName}`;
-    $("#connectWalletBtn").classList.add("connected");
+    setWalletButtonConnected(true);
     $("#profileBtn").hidden = false;
     listenToMyProfile();
     addLog(`Wallet: <span class="highlight">${state.playerName}</span>`);
@@ -428,7 +510,9 @@ async function connectWallet() {
         if (accs.length > 0) {
             state.playerAddr = accs[0];
             state.playerName = shortAddr(state.playerAddr);
-            $("#connectWalletBtn").textContent = `⚡ ${state.playerName}`;
+            setWalletButtonConnected(true);
+        } else {
+            disconnectWallet();
         }
     });
 
@@ -473,8 +557,10 @@ function loadRoomList() {
                 </div>
                 <div class="room-item-actions">
                     <span class="pill pill-violet">${phaseLabel}</span>
-                    ${isMyRoom ? `<button class="room-del-btn" title="Delete this room">🗑</button>` : ""}
                     <button class="room-join-btn" data-id="${id}">JOIN</button>
+                    ${isMyRoom ? `<button class="room-del-btn" title="Delete this court" aria-label="Delete this court">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                    </button>` : ""}
                 </div>`;
                 
             li.querySelector(".room-join-btn").onclick = () => joinRoom(id);
@@ -675,7 +761,7 @@ function listenToRoom(code) {
                 triggerAIJudge(room).finally(() => { state._judging = false; });
             }
             if (room.phase === "RESULTS" && room.results) {
-                showResults(room.results, room.winner, room.claims, room.judgeTx);
+                showResults(room.results, room.winner, room.claims, room.judgeTx, room.xpSummary);
                 launchConfetti();
                 playSound("win");
                 const wd = room.results[room.winner];
@@ -688,7 +774,7 @@ function listenToRoom(code) {
             buildVotingUI(room.claims);
         }
         if (room.phase === "RESULTS" && room.results) {
-            showResults(room.results, room.winner, room.claims, room.judgeTx);
+            showResults(room.results, room.winner, room.claims, room.judgeTx, room.xpSummary);
         }
     });
 }
@@ -706,7 +792,7 @@ function renderPlayers(players, max, host) {
             const addr   = p.address || "";
             const isYou  = addr.toLowerCase() === state.playerAddr.toLowerCase();
             const isHost = addr.toLowerCase() === host?.toLowerCase();
-            const avatar = profileAvatar(addr, fallbacks[i%4]);
+            const avatar = avatarHtml(addr, "gen-avatar-lg");
             const name   = profileName(addr) !== shortAddr(addr) ? profileName(addr) : (p.name || shortAddr(addr));
             html += `<div class="player-slot occupied ${isYou?"you":""} animate-in" data-player-addr="${addr}">
                 ${isHost ? '<div class="player-badge-you">HOST</div>' : ""}
@@ -1322,10 +1408,11 @@ async function triggerAIJudge(room) {
 // ══════════════════════════════════════════════════════
 //  RESULTS DISPLAY
 // ══════════════════════════════════════════════════════
-function showResults(results, winner, claims, judgeTx) {
+function showResults(results, winner, claims, judgeTx, xpSummary) {
     // Remove any old notes / TX badges
     $$("#winnerName ~ p, #judgeTxLink").forEach(n => n.remove());
     $("#resultsOverlay").classList.add("visible");
+    renderXpDistribution(results, xpSummary);
     const wd = results[winner];
     $("#winnerName").textContent = wd?.username || shortAddr(winner);
 
@@ -1443,6 +1530,7 @@ function showPhase(phase) {
     // Toggle welcome screen vs room UI
     if (phase === "NONE" || !state.currentRoomId) {
         $("#welcomeSection").style.display = "block";
+        const how = $("#howToPlaySection"); if (how) how.style.display = "block";
         $("#phaseBar").style.display = "none";
         $("#themeBanner").style.display = "none";
         ["roomLobby","claimSection","votingSection","judgingSection","waitingSection"]
@@ -1450,6 +1538,7 @@ function showPhase(phase) {
         return;
     } else {
         $("#welcomeSection").style.display = "none";
+        const how = $("#howToPlaySection"); if (how) how.style.display = "none";
         $("#phaseBar").style.display = "flex";
         $("#themeBanner").style.display = "flex";
     }
@@ -1483,7 +1572,30 @@ function showPhase(phase) {
 //  EVENT LISTENERS
 // ══════════════════════════════════════════════════════
 function setupEventListeners() {
-    $("#connectWalletBtn").onclick = connectWallet;
+    $("#connectWalletBtn").onclick = (e) => {
+        e.stopPropagation();
+        if (state.connected) toggleWalletMenu();
+        else connectWallet();
+    };
+    $("#walletCopyBtn").onclick = async () => {
+        try {
+            await navigator.clipboard.writeText(state.playerAddr || "");
+            showToast("Address copied!", "success");
+        } catch { showToast("Copy failed", "error"); }
+        toggleWalletMenu(false);
+    };
+    $("#walletExplorerBtn").onclick = () => {
+        if (state.playerAddr) window.open(`${EXPLORER_URL}address/${state.playerAddr}`, "_blank", "noopener");
+        toggleWalletMenu(false);
+    };
+    $("#walletDisconnectBtn").onclick = () => {
+        disconnectWallet();
+    };
+    // Click outside closes menu
+    document.addEventListener("click", (e) => {
+        const wrap = e.target.closest(".wallet-wrap");
+        if (!wrap) toggleWalletMenu(false);
+    });
 
     const modal = $("#createRoomModal");
     $("#createRoomBtn").addEventListener("click", () => {
@@ -1603,6 +1715,10 @@ document.addEventListener("DOMContentLoaded", () => {
     setupEventListeners();
     loadRoomList();
     loadLeaderboard();
+    listenToAllProfiles();
+    listenToAllLevels();
+    listenRecentWins();
+    ensureWeeklyTheme().then(renderWeeklyBanner).catch(()=>{});
     addLog(`Bradbury Testnet <span class="highlight">GenLayer Engine</span> Ready.`);
     showPhase("NONE");
     refreshIcons();
@@ -1624,18 +1740,21 @@ function renderLeaderboard() {
             </li>`;
         return;
     }
-    const tags = ["Master Perjurer", "Silver Tongue", "Convincing", "Apprentice", "Initiate"];
     let html = "";
     _leaderboardEntries.forEach((e, i) => {
         const rankClass = i < 3 ? `rank-${i+1}` : "";
-        const tag = tags[i] || "Initiate";
-        const avatar = profileAvatar(e.addr, "🎭");
+        const lvl = getLevelInfo(e.addr);
+        const avatar = avatarHtml(e.addr, "gen-avatar-md");
         const name   = profileName(e.addr) !== shortAddr(e.addr) ? profileName(e.addr) : e.name;
+        const xp     = lvl.totalXp.toLocaleString();
         html += `<li class="lb-entry" data-player-addr="${e.addr}" style="cursor:pointer">
             <span class="lb-rank ${rankClass}">${i+1}</span>
-            <span class="lb-avatar" style="font-size:18px;line-height:1">${avatar}</span>
-            <div class="lb-info"><span class="lb-name">${name}</span><span class="lb-tag">${tag}</span></div>
-            <span class="lb-score">${e.score}</span>
+            <span class="lb-avatar">${avatar}</span>
+            <div class="lb-info">
+              <span class="lb-name">${name}</span>
+              <span class="lb-tag"><span class="lb-lvl">Lvl ${lvl.level}</span> · ${lvl.title}</span>
+            </div>
+            <span class="lb-score"><span class="lb-xp-num">${xp}</span><span class="lb-xp-label">XP</span></span>
         </li>`;
     });
     lb.innerHTML = html;
@@ -1656,12 +1775,428 @@ function loadLeaderboard() {
             .map(([addr, d]) => ({ addr, score: d.score || 0, wins: d.wins || 0, name: d.name || shortAddr(addr) }))
             .sort((a, b) => b.score - a.score);
         renderLeaderboard();
+        // One-time backfill: seed levels/{addr}/totalXp = score * XP_PER_POINT
+        _leaderboardEntries.forEach(e => seedLevelFromScore(e.addr, e.score));
+        // One-time backfill: populate Recent Wins feed from leaderboard
+        seedRecentWinsFromLeaderboard(_leaderboardEntries);
     });
 }
 
+// ══════════════════════════════════════════════════════
+//  XP DISTRIBUTION PANEL (post-game)
+// ══════════════════════════════════════════════════════
+function renderXpDistribution(results, xpSummary) {
+    const container = $("#xpDistribution");
+    if (!container) return;
+
+    // If host hasn't computed summary yet, compute a fallback locally
+    let summary = xpSummary;
+    if (!summary) {
+        summary = {};
+        const theme = state._lastRoom?.theme;
+        const isWeekly = _weeklyTheme && theme && _weeklyTheme.theme === theme;
+        const mult = isWeekly ? 2 : 1;
+        for (const [addr, res] of Object.entries(results || {})) {
+            const xpDelta = pointsToXp(res.points) * mult;
+            summary[addr] = { xpDelta, multiplier: mult, isWeeklyMatch: isWeekly, levelUp: false, theme };
+        }
+    }
+
+    // Sort by xpDelta desc
+    const entries = Object.entries(summary).sort((a, b) => (b[1].xpDelta || 0) - (a[1].xpDelta || 0));
+
+    if (entries.length === 0) { container.innerHTML = ""; return; }
+
+    const isWeeklyMatch = entries[0]?.[1]?.isWeeklyMatch;
+    let html = `
+      <div class="xp-header">
+        <div class="theme-label" style="color:var(--gold)">XP Distribution</div>
+        <h3>The chamber awards <i>experience</i></h3>
+        ${isWeeklyMatch ? `<div class="xp-weekly-badge">⚡ Theme of the Week — <strong>2× XP</strong></div>` : ""}
+      </div>
+      <div class="xp-list">
+    `;
+
+    entries.forEach(([addr, s], i) => {
+        const after  = typeof s.after === "number" ? s.after : (s.before || 0) + (s.xpDelta || 0);
+        const before = typeof s.before === "number" ? s.before : Math.max(0, after - (s.xpDelta || 0));
+        const lvlAfter  = levelFromXp(after);
+        const lvlBefore = levelFromXp(before);
+        const isLvlUp   = lvlAfter.level > lvlBefore.level;
+        const avatar    = avatarHtml(addr, "gen-avatar-md");
+        const name      = profileName(addr);
+        const sign      = (s.xpDelta || 0) >= 0 ? "+" : "";
+        const deltaCls  = (s.xpDelta || 0) >= 0 ? "xp-delta-pos" : "xp-delta-neg";
+
+        html += `
+          <div class="xp-entry ${isLvlUp ? "leveled-up" : ""}">
+            <div class="xp-entry-head">
+              <span class="xp-avatar">${avatar}</span>
+              <div class="xp-name-block">
+                <div class="xp-name">${name}</div>
+                <div class="xp-level-line">
+                  <span class="xp-level-badge">Lvl ${lvlAfter.level}</span>
+                  <span class="xp-level-title">${lvlAfter.title}</span>
+                  ${isLvlUp ? `<span class="xp-levelup-badge">⬆ LVL UP!</span>` : ""}
+                </div>
+              </div>
+              <div class="xp-delta ${deltaCls}">${sign}${s.xpDelta} XP</div>
+            </div>
+            <div class="xp-bar">
+              <div class="xp-bar-fill" style="width: 0%" data-target="${lvlAfter.progress}"></div>
+            </div>
+            <div class="xp-bar-meta">
+              <span>${lvlAfter.currentLevelXp} / ${lvlAfter.nextLevelXp} XP</span>
+              <span class="xp-total">${after.toLocaleString()} total</span>
+            </div>
+          </div>
+        `;
+    });
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Animate bars
+    requestAnimationFrame(() => {
+        container.querySelectorAll(".xp-bar-fill").forEach(el => {
+            const target = el.dataset.target || "0";
+            setTimeout(() => { el.style.width = target + "%"; }, 200);
+        });
+    });
+}
+
+// ══════════════════════════════════════════════════════
+//  RECENT XP WINS FEED (sidebar)
+// ══════════════════════════════════════════════════════
+let _recentWins = [];
+let _recentWinsListener = null;
+
+function listenRecentWins() {
+    if (_recentWinsListener) return;
+    _recentWinsListener = db.ref("recentXp")
+        .on("value", snap => {
+            const all = snap.val() || {};
+            _recentWins = Object.values(all)
+                .filter(v => v && v.addr)
+                .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+                .slice(0, 5);
+            renderRecentWins();
+        });
+}
+
+// Backfill Recent Wins from leaderboard. Idempotent per-address: pushes a
+// synthetic entry only if that address has no entry in recentXp yet.
+let _recentSeedRunning = false;
+async function seedRecentWinsFromLeaderboard(entries) {
+    if (_recentSeedRunning) return;
+    _recentSeedRunning = true;
+    try {
+        const top = (entries || []).filter(e => e.score > 0).slice(0, 8);
+        if (top.length === 0) return;
+        // Read existing recentXp once to find which addresses are already represented
+        const feedSnap = await db.ref("recentXp").once("value");
+        const existing = new Set();
+        const repairs = {};
+        feedSnap.forEach(child => {
+            const v = child.val();
+            if (v && v.addr) existing.add(v.addr.toLowerCase());
+            // Repair synthetic entries that used cumulative score as xpDelta (unrealistic)
+            if (v && v.synthetic && (v.xpDelta > 30 || v.xpDelta < 0)) {
+                let h = 0;
+                for (let i = 0; i < v.addr.length; i++) h = (h * 31 + v.addr.charCodeAt(i)) >>> 0;
+                repairs[`recentXp/${child.key}/xpDelta`] = 4 + ((h >> 4) % 25);
+            }
+        });
+        if (Object.keys(repairs).length > 0) {
+            try { await db.ref().update(repairs); } catch(_) {}
+        }
+        const themePool = ["Geography","History","Science","Sports","Technology","Random"];
+        const updates = {};
+        const now = Date.now();
+        let pushed = 0;
+        top.forEach((e, idx) => {
+            if (existing.has(e.addr.toLowerCase())) return; // skip — already in feed
+            let h = 0;
+            for (let i = 0; i < e.addr.length; i++) h = (h * 31 + e.addr.charCodeAt(i)) >>> 0;
+            const minutesAgo = 60 + (h % (60 * 24 * 6)); // 1h to 6d
+            const ts = now - minutesAgo * 60 * 1000 - idx * 1000;
+            const theme = themePool[h % themePool.length];
+            // Per-round XP, not cumulative — realistic single-game gain (4–28)
+            const xpDelta = 4 + ((h >> 4) % 25);
+            const lvl = levelFromXp(e.score * XP_PER_POINT).level;
+            const key = db.ref("recentXp").push().key;
+            updates[`recentXp/${key}`] = {
+                addr: e.addr, xpDelta, theme,
+                isWeeklyMatch: false,
+                levelUp: false,
+                levelAfter: lvl,
+                ts,
+                synthetic: true,
+            };
+            pushed++;
+        });
+        if (pushed > 0) await db.ref().update(updates);
+    } catch (err) {
+        console.warn("Recent wins seed failed:", err);
+    } finally {
+        _recentSeedRunning = false;
+    }
+}
+
+function timeAgo(ts) {
+    const diff = Math.max(0, Date.now() - (ts || 0));
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+}
+
+function renderRecentWins() {
+    const el = $("#recentWins");
+    if (!el) return;
+    if (_recentWins.length === 0) {
+        el.innerHTML = `
+            <li class="rw-empty">
+                <div class="rw-empty-icon">⚡</div>
+                <div class="rw-empty-text">No XP awarded yet. Play a round!</div>
+            </li>`;
+        return;
+    }
+    const themeIcons = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
+    el.innerHTML = _recentWins.slice(0, 5).map(w => {
+        const av = avatarHtml(w.addr, "gen-avatar-md");
+        const name = profileName(w.addr) !== shortAddr(w.addr) ? profileName(w.addr) : shortAddr(w.addr);
+        const themeIcon = w.theme ? (themeIcons[w.theme] || "🎲") : "";
+        return `<li class="rw-entry" data-player-addr="${w.addr}">
+            <span class="rw-avatar">${av}</span>
+            <div class="rw-info">
+              <span class="rw-name">${name}</span>
+              <span class="rw-meta">
+                ${themeIcon ? `<span class="rw-theme">${themeIcon}</span>` : ""}
+                <span class="rw-time">${timeAgo(w.ts)}</span>
+                ${w.levelUp ? '<span class="rw-lvlup">LVL UP</span>' : ""}
+              </span>
+            </div>
+            <span class="rw-xp">
+              +${w.xpDelta}
+              ${w.isWeeklyMatch ? '<span class="rw-x2">2×</span>' : ""}
+            </span>
+        </li>`;
+    }).join("");
+    el.querySelectorAll("[data-player-addr]").forEach(li => {
+        li.onclick = (e) => {
+            e.stopPropagation();
+            showProfilePopover(li.dataset.playerAddr, li);
+        };
+    });
+}
+
+// ══════════════════════════════════════════════════════
+//  LEVELS CACHE (real-time)
+// ══════════════════════════════════════════════════════
+const levelsCache = {}; // { addr: { totalXp, byTheme, ... } }
+let _levelsListener = null;
+
+function listenToAllLevels() {
+    if (_levelsListener) return;
+    _levelsListener = db.ref("levels").on("value", snap => {
+        const all = snap.val() || {};
+        for (const [addr, d] of Object.entries(all)) {
+            levelsCache[addr.toLowerCase()] = d;
+        }
+        // Re-render dependent UIs
+        renderLeaderboard();
+    });
+}
+
+// XP conversion for legacy/unseeded scores (1 game point = 1 XP)
+const XP_PER_POINT = 1;
+const SEED_VERSION = 2;
+
+// One-time seeding so existing leaderboard scores translate to XP/levels.
+// Idempotent: only seeds when no level record exists yet, or when totalXp
+// is below the score-derived XP (e.g. legacy entries that predate the XP system).
+const _seededLevels = new Set();
+function seedLevelFromScore(addr, score) {
+    if (!addr || !score || score <= 0) return;
+    const key = addr.toLowerCase();
+    if (_seededLevels.has(key)) return;
+    _seededLevels.add(key);
+    const seedXp = score * XP_PER_POINT;
+    db.ref(`levels/${key}`).transaction(curr => {
+        if (!curr) {
+            return { totalXp: seedXp, byTheme: {}, weeklyXp: 0, seededFromScore: true, seedVersion: SEED_VERSION, seededAt: Date.now() };
+        }
+        // Re-seed when seed formula changes (older seeds used a different multiplier)
+        if (curr.seededFromScore && curr.seedVersion !== SEED_VERSION) {
+            curr.totalXp = seedXp;
+            curr.seedVersion = SEED_VERSION;
+            curr.seededAt = Date.now();
+            return curr;
+        }
+        // Top up unseeded entries that have a lower XP than the score implies
+        if (!curr.seededFromScore && (curr.totalXp || 0) < seedXp) {
+            curr.totalXp = seedXp;
+            curr.seededFromScore = true;
+            curr.seedVersion = SEED_VERSION;
+            curr.seededAt = Date.now();
+            return curr;
+        }
+        return; // abort transaction (no change)
+    }).catch(() => {});
+}
+
+function getLevelInfo(addr) {
+    if (!addr) return levelFromXp(0);
+    const key = addr.toLowerCase();
+    const data = levelsCache[key];
+    let xp = data?.totalXp;
+    // Fallback: derive from leaderboard score for accounts not yet seeded
+    if (xp == null) {
+        const lb = _leaderboardEntries.find(e => e.addr.toLowerCase() === key);
+        xp = (lb?.score || 0) * XP_PER_POINT;
+    }
+    return levelFromXp(xp);
+}
+
+// ══════════════════════════════════════════════════════
+//  XP / LEVEL SYSTEM
+// ══════════════════════════════════════════════════════
+const LEVEL_TIERS = [
+    { lvl: 1, min: 0,   max: 20,    title: "Initiate"        },
+    { lvl: 2, min: 20,  max: 60,    title: "Apprentice"      },
+    { lvl: 3, min: 60,  max: 120,   title: "Convincing"      },
+    { lvl: 4, min: 120, max: 200,   title: "Silver Tongue"   },
+    { lvl: 5, min: 200, max: 300,   title: "Master Perjurer" },
+    { lvl: 6, min: 300, max: 440,   title: "Grandmaster"     },
+    { lvl: 7, min: 440, max: 99999, title: "Court Sovereign" },
+];
+
+function levelFromXp(xp) {
+    xp = Math.max(0, xp || 0);
+    const tier = LEVEL_TIERS.find(t => xp >= t.min && xp < t.max) || LEVEL_TIERS[LEVEL_TIERS.length-1];
+    const inLevel = xp - tier.min;
+    const span = tier.max - tier.min;
+    return {
+        level: tier.lvl,
+        title: tier.title,
+        currentLevelXp: inLevel,
+        nextLevelXp: span,
+        progress: Math.min(100, Math.round((inLevel / span) * 100)),
+        totalXp: xp,
+    };
+}
+
+// Convert game points → XP (1:1 with leaderboard score; capped to avoid abuse)
+function pointsToXp(points) {
+    const base = (points || 0) * XP_PER_POINT;
+    return Math.max(-6, Math.min(24, base));   // floor/ceiling
+}
+
+// ── Weekly theme rotation ───────────────────────────
+function getWeekStartTs() {
+    const now = new Date();
+    const day = now.getUTCDay() || 7;          // Mon=1..Sun=7
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    monday.setUTCDate(monday.getUTCDate() - (day - 1));
+    return monday.getTime();
+}
+
+const THEME_POOL = ["Geography", "History", "Science", "Sports", "Technology", "Random"];
+let _weeklyTheme = null;
+
+async function ensureWeeklyTheme() {
+    if (_weeklyTheme && _weeklyTheme.weekStartTs === getWeekStartTs()) return _weeklyTheme;
+    const ref = db.ref("weeklyTheme");
+    const snap = await ref.once("value");
+    const cur = snap.val();
+    const wkTs = getWeekStartTs();
+    if (cur && cur.weekStartTs === wkTs) {
+        _weeklyTheme = cur;
+        return cur;
+    }
+    // Pick deterministically based on week to avoid race conditions
+    const seed = Math.floor(wkTs / (7 * 24 * 3600 * 1000));
+    const theme = THEME_POOL[seed % THEME_POOL.length];
+    const next = { theme, weekStartTs: wkTs };
+    try { await ref.set(next); } catch (_) {}
+    _weeklyTheme = next;
+    return next;
+}
+
+function renderWeeklyBanner() {
+    const el = $("#weeklyThemeBanner");
+    if (!el || !_weeklyTheme) return;
+    const themeIcons = { Geography:"🌍", History:"📜", Science:"🔬", Sports:"⚽", Technology:"💻", Random:"🎲" };
+    $("#weeklyThemeName").textContent = _weeklyTheme.theme;
+    $("#weeklyThemeIcon").textContent = themeIcons[_weeklyTheme.theme] || "🎲";
+    const howWk = $("#howWeeklyTheme"); if (howWk) howWk.textContent = _weeklyTheme.theme;
+    el.hidden = false;
+}
+
+// ── Award XP after game ─────────────────────────────
+async function awardXp(results, roomTheme) {
+    if (!results) return {};
+    const wk = await ensureWeeklyTheme().catch(() => null);
+    const isWeeklyMatch = wk && roomTheme && wk.theme === roomTheme;
+    const multiplier = isWeeklyMatch ? 2 : 1;
+
+    const summary = {}; // { addr: { xpDelta, before, after, levelUp, theme } }
+    const tasks = [];
+
+    for (const [addr, res] of Object.entries(results)) {
+        const xpDelta = pointsToXp(res.points) * multiplier;
+        const ref = db.ref(`levels/${addr}`);
+        const wkTs = getWeekStartTs();
+
+        const task = ref.transaction(cur => {
+            if (!cur) cur = { totalXp: 0, byTheme: {}, weeklyXp: 0, weekStartTs: wkTs };
+            if (cur.weekStartTs !== wkTs) { cur.weeklyXp = 0; cur.weekStartTs = wkTs; }
+            const beforeXp = cur.totalXp || 0;
+            cur.totalXp   = Math.max(0, beforeXp + xpDelta);
+            cur.byTheme   = cur.byTheme || {};
+            if (roomTheme) cur.byTheme[roomTheme] = Math.max(0, (cur.byTheme[roomTheme] || 0) + xpDelta);
+            cur.weeklyXp  = Math.max(0, (cur.weeklyXp || 0) + xpDelta);
+            cur.updatedAt = Date.now();
+            return cur;
+        }).then(tx => {
+            const after = tx.snapshot.val() || { totalXp: 0 };
+            const before = after.totalXp - xpDelta;
+            const lvlBefore = levelFromXp(before).level;
+            const lvlAfter  = levelFromXp(after.totalXp).level;
+            summary[addr] = {
+                xpDelta, multiplier, isWeeklyMatch,
+                before, after: after.totalXp,
+                levelBefore: lvlBefore, levelAfter: lvlAfter,
+                levelUp: lvlAfter > lvlBefore,
+                theme: roomTheme,
+                themeXp: after.byTheme?.[roomTheme] || 0,
+            };
+            // Push to recent wins feed (only positive XP gains)
+            if (xpDelta > 0) {
+                db.ref("recentXp").push({
+                    addr, xpDelta, theme: roomTheme || "",
+                    isWeeklyMatch: !!isWeeklyMatch,
+                    levelUp: lvlAfter > lvlBefore,
+                    levelAfter: lvlAfter,
+                    ts: Date.now(),
+                }).catch(()=>{});
+            }
+        }).catch(err => console.warn("XP award failed for", addr, err));
+
+        tasks.push(task);
+    }
+
+    await Promise.all(tasks);
+    return summary;
+}
+
 // Update leaderboard after game results
-function updateLeaderboard(results) {
-    if (!results) return;
+async function updateLeaderboard(results) {
+    if (!results) return null;
+    // Update cumulative score (existing)
     for (const [addr, res] of Object.entries(results)) {
         const ref = db.ref(`leaderboard/${addr}`);
         ref.transaction(current => {
@@ -1671,4 +2206,15 @@ function updateLeaderboard(results) {
             return current;
         });
     }
+    // Award XP per theme
+    const theme = state._lastRoom?.theme || state.roomData?.theme;
+    const xpSummary = await awardXp(results, theme);
+    state._lastXpSummary = xpSummary;
+    // Broadcast to all clients via room
+    if (state.currentRoomId) {
+        try {
+            await db.ref(`rooms/${state.currentRoomId}/xpSummary`).set(xpSummary);
+        } catch (e) { console.warn("xpSummary write failed:", e); }
+    }
+    return xpSummary;
 }

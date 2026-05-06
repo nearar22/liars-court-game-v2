@@ -28,6 +28,19 @@ The core of this game leverages GenLayer's **Equivalence Principle** and **Non-d
 
 ---
 
+## ✅ Design Requirements — How We Honored Them
+
+This game was built around four core design principles. Here is how each is reflected in the implementation:
+
+| Requirement | Implementation |
+|---|---|
+| **Multiplayer and/or in rooms** | Players create or join named **Courts (rooms)** that support **2–4 players**. Real-time room state, presence, voting and judging are synced via Firebase Realtime Database. |
+| **Last between 5–15 min** | A full session takes **~5–10 min** — short claim/voting timers, fast AI judging via GenLayer LLM validators, and a single-round structure keep matches tight and replayable. |
+| **Replayable once per week (new / random content or expertise level-up)** | Two mechanics combine: <br>• A **Weekly Theme** auto-rotates every Monday (`Geography → History → Science → Sports → Technology → Random`) — playing the active weekly theme grants a **2× XP multiplier**. <br>• An **Expertise Level-Up** system tracks XP **per theme**, so each week players grow stronger in the rotating discipline (`byTheme` XP, theme-specific tiers). |
+| **Leaderboard after the game for XP distribution** | After every round, a **post-game XP Distribution panel** breaks down each player's gain (base XP, weekly 2× bonus, level-up animation, theme-specific XP). The persistent **Top Liars** leaderboard and live **Recent Wins** feed reflect XP in real time across the whole community. |
+
+---
+
 ## 🛠️ Architecture & Tech Stack
 * **Smart Contract (Backend):** Written in Python (`contract.py`) using the `genlayer` SDK. It handles the state machine for the game phases and the AI Judge logic.
 * **Frontend:** Built with HTML, CSS (`style.css`), and Vanilla JavaScript (`app.js`). It integrates the `genlayer-bridge` to connect wallets and send transactions to the GenLayer network.

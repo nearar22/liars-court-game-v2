@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="style.css?v=30" />
+  <link rel="stylesheet" href="style.css?v=47" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -53,15 +53,46 @@
         <span class="network-dot"></span>
         Bradbury Testnet
       </span>
-      <button id="connectWalletBtn" class="wallet-btn" type="button">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
-        <span>Connect Wallet</span>
-      </button>
+      <div class="wallet-wrap">
+        <button id="connectWalletBtn" class="wallet-btn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+          <span id="walletBtnText">Connect Wallet</span>
+          <svg id="walletBtnChevron" class="wallet-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" hidden><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div id="walletMenu" class="wallet-menu" hidden>
+          <div class="wallet-menu-head">
+            <span class="wallet-menu-label">Connected</span>
+            <span id="walletMenuAddr" class="wallet-menu-addr">0x…</span>
+          </div>
+          <button id="walletCopyBtn" class="wallet-menu-item" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            Copy Address
+          </button>
+          <button id="walletExplorerBtn" class="wallet-menu-item" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            View on Explorer
+          </button>
+          <button id="walletDisconnectBtn" class="wallet-menu-item wallet-menu-danger" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+            Disconnect
+          </button>
+        </div>
+      </div>
       <button id="profileBtn" class="profile-btn" type="button" hidden title="Edit Profile">
         <span id="profileBtnAvatar" class="profile-btn-avatar">🎭</span>
       </button>
     </div>
   </header>
+
+  <!-- ============ WEEKLY THEME BANNER ============ -->
+  <div id="weeklyThemeBanner" class="weekly-banner" hidden>
+    <span id="weeklyThemeIcon" class="weekly-banner-icon">🌍</span>
+    <div class="weekly-banner-text">
+      <span class="weekly-banner-label">Theme of the Week</span>
+      <strong id="weeklyThemeName">Geography</strong>
+    </div>
+    <span class="weekly-banner-bonus">⚡ 2× XP</span>
+  </div>
 
   <!-- ============ APP ============ -->
   <div class="app">
@@ -92,10 +123,12 @@
 
       <section class="card">
         <h3 class="card-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          Activity Log
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Recent Wins
         </h3>
-        <ul id="activityLog" class="activity-log"></ul>
+        <ul id="recentWins" class="recent-wins"></ul>
+        <!-- Activity log preserved (hidden) for backward compatibility with addLog() calls -->
+        <ul id="activityLog" class="activity-log" hidden></ul>
       </section>
 
     </aside>
@@ -152,6 +185,103 @@
               <path d="M4 7h16" stroke="url(#sg-gold)" stroke-width="1.2" stroke-linecap="round"/>
               <path d="M4 7l-3 6a3 3 0 006 0L4 7zM20 7l-3 6a3 3 0 006 0L20 7z" stroke="url(#sg-gold)" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW TO PLAY -->
+      <section id="howToPlaySection" class="how-section animate-in">
+        <div class="how-head">
+          <span class="pill pill-violet how-pill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            How the Court Works
+          </span>
+          <h2 class="how-title">Four acts. <i class="iridescent">One verdict.</i></h2>
+          <p class="how-desc">Each round, the chamber convenes, players testify, and the AI Judge weighs every word.</p>
+        </div>
+
+        <div class="how-grid">
+          <div class="how-card">
+            <span class="how-num">01</span>
+            <div class="how-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v18M5 21h14M9 5h6"/>
+                <path d="M4 7h16"/>
+                <path d="M4 7l-3 6a3 3 0 0 0 6 0L4 7zM20 7l-3 6a3 3 0 0 0 6 0L20 7z"/>
+              </svg>
+            </div>
+            <h3 class="how-card-title">Open or Join a Court</h3>
+            <p class="how-card-desc">Create a new chamber with a theme, or join an existing one with a 4-letter code. Up to 4 players per court.</p>
+          </div>
+
+          <div class="how-card">
+            <span class="how-num">02</span>
+            <div class="how-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                <path d="m15 5 4 4"/>
+              </svg>
+            </div>
+            <h3 class="how-card-title">Submit Your Statement</h3>
+            <p class="how-card-desc">Draft a claim — truth or lie — within the round's theme. Mark its true nature secretly. The chamber will judge.</p>
+          </div>
+
+          <div class="how-card">
+            <span class="how-num">03</span>
+            <div class="how-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m9 12 2 2 4-4"/>
+                <path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2V7Z"/>
+                <path d="M22 19a2 2 0 0 1-2 2H7"/>
+              </svg>
+            </div>
+            <h3 class="how-card-title">Vote on the Others</h3>
+            <p class="how-card-desc">Read your peers' statements. Decide which are <span class="how-true">truth</span> and which are <span class="how-lie">lies</span>. Your votes matter.</p>
+          </div>
+
+          <div class="how-card">
+            <span class="how-num">04</span>
+            <div class="how-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v4"/>
+                <rect x="4" y="6" width="16" height="14" rx="3"/>
+                <circle cx="9" cy="13" r="1.2" fill="currentColor"/>
+                <circle cx="15" cy="13" r="1.2" fill="currentColor"/>
+                <path d="M9 17h6"/>
+                <path d="M2 14h2M20 14h2"/>
+              </svg>
+            </div>
+            <h3 class="how-card-title">The AI Judge Rules</h3>
+            <p class="how-card-desc">A council of validators on Bradbury testnet deliberates by Equivalence Principle. The verdict is final, on-chain, immutable.</p>
+          </div>
+        </div>
+
+        <div class="how-scoring">
+          <div class="how-scoring-head">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--gold)"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+            <h3>Scoring &amp; XP</h3>
+          </div>
+          <div class="how-scoring-grid">
+            <div class="how-scoring-item">
+              <span class="how-pts how-pts-pos">+30</span>
+              <span class="how-pts-label">Lie believed by everyone</span>
+            </div>
+            <div class="how-scoring-item">
+              <span class="how-pts how-pts-pos">+15</span>
+              <span class="how-pts-label">Truth correctly identified</span>
+            </div>
+            <div class="how-scoring-item">
+              <span class="how-pts how-pts-pos">+10</span>
+              <span class="how-pts-label">Each correct vote you cast</span>
+            </div>
+            <div class="how-scoring-item">
+              <span class="how-pts how-pts-neg">−10</span>
+              <span class="how-pts-label">Caught lying</span>
+            </div>
+          </div>
+          <div class="how-scoring-foot">
+            <span class="how-foot-badge">⚡ 2× XP</span>
+            <span>Play this week's <strong id="howWeeklyTheme">theme</strong> to double your XP gains.</span>
           </div>
         </div>
       </section>
@@ -364,6 +494,8 @@
         </tbody>
       </table>
 
+      <div id="xpDistribution" class="xp-distribution"></div>
+
       <div class="results-actions">
         <button id="playAgainBtn" class="submit-claim-btn" type="button">Reconvene the Court</button>
       </div>
@@ -475,6 +607,8 @@
     <div class="profile-popover-avatar" id="popAvatar">🦊</div>
     <div class="profile-popover-name" id="popName">Player</div>
     <div class="profile-popover-addr" id="popAddr">0x...</div>
+    <div class="profile-popover-level" id="popLevel"></div>
+    <div class="profile-popover-themes" id="popThemes"></div>
     <div class="profile-popover-bio" id="popBio"></div>
     <div class="profile-popover-socials" id="popSocials"></div>
   </div>
@@ -487,7 +621,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
   <script src="genlayer-bridge.bundle.js"></script>
-  <script src="app.js?v=29"></script>
+  <script src="app.js?v=47"></script>
   <script>if(window.lucide)lucide.createIcons();</script>
 </body>
 </html>
