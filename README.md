@@ -50,6 +50,15 @@ This game was built around four core design principles. Here is how each is refl
 
 ---
 
+## 🌐 Deployed Contract (Bradbury Testnet)
+
+* **Address:** [`0x0Aa25bE06aE88699055e3Fe19D34335B434A63c8`](https://explorer-bradbury.genlayer.com/address/0x0Aa25bE06aE88699055e3Fe19D34335B434A63c8)
+* **Version:** `v3.0.0`
+* **Chain ID:** `4221` (GenLayer Bradbury)
+* **RPC:** `https://zksync-os-testnet-genlayer.zksync.dev/`
+
+---
+
 ## 💻 How to Run Locally
 1. **GenLayer Simulator:** Deploy the contract to your local GenLayer simulator.
    ```bash
